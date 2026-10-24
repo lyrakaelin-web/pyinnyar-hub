@@ -1,0 +1,6 @@
+{
+  "name": "PYINNYAR HUB",
+  "description": "Learn Without Limits. A digital learning platform that makes quality education, professional skills, and global learning opportunities accessible to Myanmar learners.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
