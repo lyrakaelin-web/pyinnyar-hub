@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { t } from '../utils/translations';
 import { UserRole, Language } from '../types';
 import {
-  User,
+  User as UserIcon,
   Mail,
   Shield,
   Settings,
@@ -14,6 +14,8 @@ import {
   Camera,
   CheckCircle2,
   Key,
+  LogIn,
+  UserPlus,
 } from 'lucide-react';
 
 export const ProfileView: React.FC = () => {
@@ -21,19 +23,68 @@ export const ProfileView: React.FC = () => {
     user,
     language,
     setLanguage,
-    switchRole,
     updateUserProfile,
     logout,
     openAuthModal,
     setCurrentView,
   } = useApp();
 
-  const [name, setName] = useState(user.name);
-  const [email, setEmail] = useState(user.email);
-  const [bio, setBio] = useState(user.bio || '');
-  const [weeklyGoal, setWeeklyGoal] = useState(user.learningPreferences.weeklyGoalHours);
-  const [notifications, setNotifications] = useState(user.learningPreferences.notificationsEnabled);
+  const [name, setName] = useState(user?.name || '');
+  const [email, setEmail] = useState(user?.email || '');
+  const [bio, setBio] = useState(user?.bio || '');
+  const [weeklyGoal, setWeeklyGoal] = useState(user?.learningPreferences?.weeklyGoalHours || 6);
+  const [notifications, setNotifications] = useState(user?.learningPreferences?.notificationsEnabled ?? true);
   const [isSavedNotice, setIsSavedNotice] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      setName(user.name);
+      setEmail(user.email);
+      setBio(user.bio || '');
+      setWeeklyGoal(user.learningPreferences.weeklyGoalHours);
+      setNotifications(user.learningPreferences.notificationsEnabled);
+    }
+  }, [user]);
+
+  if (!user) {
+    return (
+      <div className="max-w-md mx-auto my-12 text-center p-8 bg-white rounded-3xl border border-stone-200/90 shadow-sm space-y-5 animate-in fade-in duration-200">
+        <div className="w-16 h-16 rounded-2xl bg-[#14243A] text-[#C7A66A] flex items-center justify-center mx-auto text-2xl font-black shadow-sm">
+          P
+        </div>
+        <div className="space-y-2">
+          <span className="text-[10px] font-bold tracking-widest text-[#A9874B] uppercase">
+            PYINNYAR HUB Authentication
+          </span>
+          <h2 className="text-xl font-bold text-[#14243A]">
+            {language === 'my' ? 'ကျောင်းသား အကောင့်သို့ ဝင်ရောက်ပါ' : 'Sign In to Your Account'}
+          </h2>
+          <p className="text-xs text-stone-600 leading-relaxed max-w-sm mx-auto">
+            {language === 'my'
+              ? 'သင်၏ သင်ခန်းစာမှတ်တမ်းများ၊ လက်မှတ်များနှင့် ပရိုဖိုင်ကို ကြည့်ရှုစီမံရန် သင်၏ အီးမေးလ်နှင့် စကားဝှက်ဖြင့် ဝင်ရောက်ပါ။'
+              : 'Sign in to access your student profile, view certificates, resume course progress, and configure personal study preferences.'}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2.5 pt-2">
+          <button
+            onClick={() => openAuthModal(true, 'login')}
+            className="w-full py-3 bg-[#14243A] text-white rounded-xl text-xs font-bold hover:bg-[#1E3452] transition-colors shadow-xs flex items-center justify-center gap-2"
+          >
+            <LogIn className="w-4 h-4 text-[#C7A66A]" />
+            <span>{language === 'my' ? 'အကောင့်ဝင်ရောက်မည်' : 'Sign In'}</span>
+          </button>
+          <button
+            onClick={() => openAuthModal(true, 'register')}
+            className="w-full py-3 border border-stone-300 text-stone-700 bg-stone-50/50 rounded-xl text-xs font-semibold hover:bg-stone-100 transition-colors flex items-center justify-center gap-2"
+          >
+            <UserPlus className="w-4 h-4 text-stone-500" />
+            <span>{language === 'my' ? 'အကောင့်အသစ် ဖွင့်မည်' : 'Create New Account'}</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -106,53 +157,57 @@ export const ProfileView: React.FC = () => {
         </div>
       </div>
 
-      {/* Role-Based Permissions Switcher Simulator */}
+      {/* Verified Institutional Role & Security Status Card */}
       <div className="bg-[#FAF8F5] rounded-2xl border border-[#C7A66A]/40 p-5 shadow-xs space-y-3">
-        <div className="flex items-center gap-2">
-          <Shield className="w-4 h-4 text-[#A9874B]" />
-          <h3 className="font-bold text-sm text-[#14243A]">User Roles & Access Permissions</h3>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4 text-[#A9874B]" />
+            <h3 className="font-bold text-sm text-[#14243A]">Account Role & Security Verification</h3>
+          </div>
+          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200/60 flex items-center gap-1">
+            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+            Backend Verified
+          </span>
         </div>
-        <p className="text-xs text-stone-600 leading-relaxed">
-          Switch active user session to test role-based capabilities across PYINNYAR HUB:
-        </p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-          {[
-            {
-              role: 'student' as UserRole,
-              title: 'Student Role',
-              desc: 'Enrolls in courses, takes quizzes, earns certificates, joins study groups.',
-            },
-            {
-              role: 'instructor' as UserRole,
-              title: 'Instructor Role',
-              desc: 'Creates & manages courses, reviews assignments, publishes curriculum.',
-            },
-            {
-              role: 'admin' as UserRole,
-              title: 'Administrator',
-              desc: 'Full platform control: verifies payments, manages users, moderates discussions.',
-            },
-          ].map((item) => (
-            <button
-              key={item.role}
-              onClick={() => switchRole(item.role)}
-              className={`p-3.5 rounded-xl border text-left transition-all ${
-                user.role === item.role
-                  ? 'border-[#14243A] bg-white shadow-xs ring-1 ring-[#14243A]'
-                  : 'border-stone-200/90 bg-white/70 hover:bg-white'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-bold text-xs text-[#14243A]">{item.title}</span>
-                {user.role === item.role && (
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+        <div className="p-4 rounded-xl border border-stone-200/80 bg-white shadow-xs">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
+                  user.role === 'owner'
+                    ? 'bg-[#C7A66A]/20 text-[#8B6E32] border border-[#C7A66A]/50'
+                    : user.role === 'admin'
+                    ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                    : user.role === 'instructor'
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : 'bg-stone-100 text-stone-700 border border-stone-200'
+                }`}>
+                  {user.role === 'owner' ? 'Founder & Super Admin' : `${user.role} Role`}
+                </span>
+                {user.role === 'owner' && (
+                  <span className="text-[11px] font-semibold text-[#A9874B]">
+                    Primary Institutional Authority
+                  </span>
                 )}
               </div>
-              <p className="text-[11px] text-stone-500 leading-snug">{item.desc}</p>
-            </button>
-          ))}
+              <p className="text-xs text-stone-600 leading-relaxed mt-1.5">
+                {user.role === 'owner' &&
+                  'Sole Founder & Super Admin with permanent governance authority. Controls platform architecture, financial verifications, instructor authorizations, and role assignments.'}
+                {user.role === 'admin' &&
+                  'Institutional Administrator account authorized by the Founder. Manages courses, verifies payment slips, and moderates platform communities.'}
+                {user.role === 'instructor' &&
+                  'Course Instructor account authorized by Academic Standards. Creates curriculum, evaluates student assignments, and publishes courses.'}
+                {user.role === 'student' &&
+                  'Enrolled Student account with access to all 30 educational categories, interactive quizzes, certificates, and community learning.'}
+              </p>
+            </div>
+          </div>
         </div>
+
+        <p className="text-[11px] text-stone-400 leading-relaxed">
+          Self-service role modification is disabled. Administrator and Instructor roles must be authorized on the backend by the Founder & Super Admin.
+        </p>
       </div>
 
       {/* Profile & Learning Preferences Form */}

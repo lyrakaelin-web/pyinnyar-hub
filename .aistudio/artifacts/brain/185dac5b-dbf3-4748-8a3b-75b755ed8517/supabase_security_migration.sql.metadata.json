@@ -1,0 +1,5 @@
+{
+  "summary":  "Comprehensive PostgreSQL SQL migration script for Supabase with bulletproof RLS policies, non-recursive security definer functions, verified Owner email provisioning, private profile projection, enrollment tamper prevention, and instructor course ownership scoping.",
+  "updatedAt":  "2026-10-24T09:16:29.972288912Z",
+  "userFacing":  true
+}

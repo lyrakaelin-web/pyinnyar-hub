@@ -35,13 +35,54 @@ export const AdminDashboardView: React.FC = () => {
     addOpportunity,
     language,
     setCurrentView,
+    openAuthModal,
+    getAuthHeaders,
   } = useApp();
 
-  const [activeAdminTab, setActiveAdminTab] = useState<'courses' | 'categories' | 'payments' | 'moderation' | 'analytics'>('courses');
+  const [activeAdminTab, setActiveAdminTab] = useState<'courses' | 'categories' | 'payments' | 'moderation' | 'analytics' | 'roles'>('courses');
+
+  // Role promotion state for Founder & Super Admin
+  const [roleEmail, setRoleEmail] = useState('');
+  const [roleToAssign, setRoleToAssign] = useState<'admin' | 'instructor'>('instructor');
+  const [roleActionStatus, setRoleActionStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isPromotingRole, setIsPromotingRole] = useState(false);
 
   // Modal for new/edit course
   const [isCourseModalOpen, setIsCourseModalOpen] = useState(false);
   const [editingCourse, setEditingCourse] = useState<Partial<Course> | null>(null);
+
+  if (!user || (user.role !== 'admin' && user.role !== 'owner')) {
+    return (
+      <div className="max-w-md mx-auto my-12 p-8 bg-white rounded-3xl border border-stone-200 shadow-sm text-center space-y-4 animate-in fade-in duration-200">
+        <div className="w-14 h-14 rounded-2xl bg-[#14243A] text-[#C7A66A] flex items-center justify-center mx-auto">
+          <ShieldCheck className="w-8 h-8" />
+        </div>
+        <div className="space-y-1">
+          <span className="text-[10px] font-bold tracking-widest text-[#A9874B] uppercase">
+            Restricted Console
+          </span>
+          <h2 className="text-lg font-bold text-[#14243A]">Administrator Access Required</h2>
+          <p className="text-xs text-stone-600 leading-relaxed">
+            You must be signed in with an Administrator account to access the PYINNYAR HUB administration console.
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 pt-2">
+          <button
+            onClick={() => openAuthModal(true, 'login')}
+            className="w-full py-2.5 rounded-xl bg-[#14243A] text-white text-xs font-bold hover:bg-[#1E3452] transition-colors"
+          >
+            Sign In with Admin Credentials
+          </button>
+          <button
+            onClick={() => setCurrentView('home')}
+            className="w-full py-2.5 rounded-xl border border-stone-300 text-stone-700 text-xs font-semibold hover:bg-stone-50 transition-colors"
+          >
+            Return to Home
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Form states for course
   const [cTitle, setCTitle] = useState('');
@@ -211,6 +252,18 @@ export const AdminDashboardView: React.FC = () => {
           <BarChart3 className="w-4 h-4" />
           <span>Learning Analytics</span>
         </button>
+
+        {user.role === 'owner' && (
+          <button
+            onClick={() => setActiveAdminTab('roles')}
+            className={`px-4 py-2 rounded-xl font-medium transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+              activeAdminTab === 'roles' ? 'bg-[#A9874B] text-white font-bold shadow-xs' : 'text-amber-800 hover:text-amber-950 font-semibold'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4 text-amber-500" />
+            <span>Authorized Staff (Owner Only)</span>
+          </button>
+        )}
       </div>
 
       {/* Admin Tab Contents */}
@@ -370,6 +423,109 @@ export const AdminDashboardView: React.FC = () => {
             <div className="text-2xl font-black text-[#14243A] tabular-nums">412</div>
             <span className="text-[11px] text-[#A9874B] font-semibold">100% Cryptographic verifiable</span>
           </div>
+        </div>
+      )}
+
+      {activeAdminTab === 'roles' && user.role === 'owner' && (
+        <div className="bg-white rounded-2xl border border-stone-200/90 overflow-hidden shadow-xs p-6 space-y-6">
+          <div className="border-b border-stone-100 pb-4">
+            <div className="flex items-center gap-2 mb-1">
+              <ShieldCheck className="w-5 h-5 text-[#A9874B]" />
+              <h3 className="font-bold text-sm text-[#14243A]">
+                Founder & Super Admin: Staff Authorization Delegation
+              </h3>
+            </div>
+            <p className="text-xs text-stone-500">
+              Only your verified Founder account (<code className="font-mono text-amber-900 bg-amber-50 px-1.5 py-0.5 rounded">lyrakaelin@gmail.com</code>) has authority to appoint Administrators and approve Instructors. Public users cannot register for privileged roles.
+            </p>
+          </div>
+
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!roleEmail.trim()) return;
+              setIsPromotingRole(true);
+              setRoleActionStatus(null);
+
+              try {
+                const res = await fetch('/api/admin/promote-role', {
+                  method: 'POST',
+                  headers: getAuthHeaders(),
+                  body: JSON.stringify({
+                    targetEmail: roleEmail.trim().toLowerCase(),
+                    newRole: roleToAssign,
+                  }),
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                  setRoleActionStatus({ type: 'success', message: data.message });
+                  setRoleEmail('');
+                } else {
+                  setRoleActionStatus({ type: 'error', message: data.error || 'Role authorization failed.' });
+                }
+              } catch {
+                setRoleActionStatus({ type: 'error', message: 'Failed to contact authorization endpoint.' });
+              } finally {
+                setIsPromotingRole(false);
+              }
+            }}
+            className="max-w-xl space-y-4 bg-stone-50 p-5 rounded-2xl border border-stone-200"
+          >
+            <h4 className="font-bold text-xs text-stone-800 uppercase tracking-wider">
+              Authorize User Role
+            </h4>
+
+            {roleActionStatus && (
+              <div
+                className={`p-3 rounded-xl text-xs font-semibold ${
+                  roleActionStatus.type === 'success'
+                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                    : 'bg-red-50 text-red-800 border border-red-200'
+                }`}
+              >
+                {roleActionStatus.message}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-semibold text-stone-700 mb-1">
+                Target User Email
+              </label>
+              <input
+                type="email"
+                required
+                value={roleEmail}
+                onChange={(e) => setRoleEmail(e.target.value)}
+                placeholder="registered-user@pyinnyarhub.edu.mm"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-xs focus:ring-2 focus:ring-[#14243A] outline-hidden bg-white"
+              />
+              <span className="text-[11px] text-stone-400 mt-1 block">
+                User must already have registered an account before role elevation.
+              </span>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-stone-700 mb-1">
+                Designated Authorization Role
+              </label>
+              <select
+                value={roleToAssign}
+                onChange={(e) => setRoleToAssign(e.target.value as any)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-xs focus:ring-2 focus:ring-[#14243A] outline-hidden bg-white font-medium"
+              >
+                <option value="instructor">Instructor (Course creation & student grading authority)</option>
+                <option value="admin">Administrator (Platform operations & slip verification)</option>
+              </select>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isPromotingRole}
+              className="px-5 py-2.5 bg-[#14243A] hover:bg-[#1E3452] text-white text-xs font-bold rounded-xl transition-colors disabled:opacity-50"
+            >
+              {isPromotingRole ? 'Verifying & Updating...' : 'Authorize Staff Role'}
+            </button>
+          </form>
         </div>
       )}
 

@@ -6,12 +6,18 @@ import { Home, Compass, BookOpen, Users, User, ShieldCheck } from 'lucide-react'
 export const BottomNav: React.FC = () => {
   const { currentView, setCurrentView, language, user } = useApp();
 
+  const isAdmin = user?.role === 'admin' || user?.role === 'owner';
+
   const navItems: { view: ViewType; icon: React.ElementType; labelKey: string }[] = [
     { view: 'home', icon: Home, labelKey: 'nav.home' },
     { view: 'explore', icon: Compass, labelKey: 'nav.explore' },
     { view: 'mylearning', icon: BookOpen, labelKey: 'nav.mylearning' },
     { view: 'community', icon: Users, labelKey: 'nav.community' },
-    { view: user.role === 'admin' ? 'admin' : 'profile', icon: user.role === 'admin' ? ShieldCheck : User, labelKey: user.role === 'admin' ? 'nav.admin' : 'nav.profile' },
+    {
+      view: isAdmin ? 'admin' : 'profile',
+      icon: isAdmin ? ShieldCheck : User,
+      labelKey: isAdmin ? 'nav.admin' : 'nav.profile',
+    },
   ];
 
   return (

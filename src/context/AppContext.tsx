@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import {
   User,
   UserRole,
@@ -37,7 +38,9 @@ export type ViewType =
   | 'verify';
 
 interface AppContextType {
-  user: User;
+  user: User | null;
+  accessToken: string | null;
+  getAuthHeaders: () => Record<string, string>;
   language: Language;
   currentView: ViewType;
   selectedCourseId: string | null;
@@ -62,7 +65,6 @@ interface AppContextType {
   // Actions
   setLanguage: (lang: Language) => void;
   setCurrentView: (view: ViewType) => void;
-  switchRole: (role: UserRole) => void;
   selectCourse: (courseId: string) => void;
   selectCategory: (categoryId: number | null) => void;
   selectLesson: (lessonId: string) => void;
@@ -88,17 +90,64 @@ interface AppContextType {
   toggleCategoryStatus: (categoryId: number) => void;
   addOpportunity: (opp: Omit<Opportunity, 'id' | 'createdAt'>) => void;
   updateUserProfile: (updates: Partial<User>) => void;
+  login: (userData: User, token?: string) => void;
   logout: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Load or initialize state from LocalStorage
-  const [user, setUser] = useState<User>(() => {
-    const saved = localStorage.getItem('ph_user');
-    return saved ? JSON.parse(saved) : INITIAL_USER;
+  // Load or initialize state from LocalStorage - never auto-authenticate demo users
+  const [user, setUser] = useState<User | null>(() => {
+    try {
+      const saved = localStorage.getItem('ph_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
   });
+
+  const [accessToken, setAccessToken] = useState<string | null>(() => {
+    return localStorage.getItem('ph_access_token') || null;
+  });
+
+  const getAuthHeaders = (): Record<string, string> => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+    }
+    return headers;
+  };
+
+  // Listen to live Supabase session changes if configured
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setAccessToken(session.access_token);
+        localStorage.setItem('ph_access_token', session.access_token);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        setAccessToken(session.access_token);
+        localStorage.setItem('ph_access_token', session.access_token);
+      } else if (event === 'SIGNED_OUT') {
+        setUser(null);
+        setAccessToken(null);
+        localStorage.removeItem('ph_user');
+        localStorage.removeItem('ph_access_token');
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
 
   const [language, setLanguageState] = useState<Language>(() => {
     const saved = localStorage.getItem('ph_lang');
@@ -124,32 +173,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [enrollments, setEnrollments] = useState<Record<string, Enrollment>>(() => {
     const saved = localStorage.getItem('ph_enrollments');
-    if (saved) return JSON.parse(saved);
-    // Seed initial enrollment for student
-    return {
-      course_tech_01: {
-        id: 'enr_01',
-        studentId: INITIAL_USER.id,
-        courseId: 'course_tech_01',
-        enrolledAt: '2026-02-01T10:00:00Z',
-        progressPercent: 45,
-        lastAccessedLessonId: 'les_1_1',
-        lastAccessedTimeSeconds: 420,
-        completedLessonIds: ['les_1_1'],
-        paymentStatus: 'approved',
-      },
-      course_biz_01: {
-        id: 'enr_02',
-        studentId: INITIAL_USER.id,
-        courseId: 'course_biz_01',
-        enrolledAt: '2026-02-12T10:00:00Z',
-        progressPercent: 15,
-        lastAccessedLessonId: 'les_biz_1_1',
-        lastAccessedTimeSeconds: 120,
-        completedLessonIds: [],
-        paymentStatus: 'approved',
-      },
-    };
+    return saved ? JSON.parse(saved) : {};
   });
 
   const [quizAttempts, setQuizAttempts] = useState<QuizAttempt[]>(() => {
@@ -198,7 +222,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Sync state to LocalStorage
   useEffect(() => {
-    localStorage.setItem('ph_user', JSON.stringify(user));
+    if (user) {
+      localStorage.setItem('ph_user', JSON.stringify(user));
+    } else {
+      localStorage.removeItem('ph_user');
+    }
   }, [user]);
 
   useEffect(() => {
@@ -235,23 +263,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const setLanguage = (lang: Language) => {
     setLanguageState(lang);
-    setUser((prev) => ({
+    setUser((prev) => (prev ? {
       ...prev,
       learningPreferences: { ...prev.learningPreferences, language: lang },
-    }));
-  };
-
-  const switchRole = (newRole: UserRole) => {
-    if (newRole === 'admin') {
-      setUser(ADMIN_USER);
-      setCurrentView('admin');
-    } else if (newRole === 'instructor') {
-      setUser(INSTRUCTOR_USER);
-      setCurrentView('admin');
-    } else {
-      setUser(INITIAL_USER);
-      setCurrentView('home');
-    }
+    } : null));
   };
 
   const selectCourse = (courseId: string) => {
@@ -295,6 +310,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     paymentMethod: 'kpay' | 'wave' | 'ayapay' | 'bank_transfer' | 'none' = 'none',
     slipRef = ''
   ) => {
+    if (!user) {
+      openAuthModal(true, 'login');
+      return;
+    }
     const course = courses.find((c) => c.id === courseId);
     const isFree = !course || course.priceMMK === 0;
 
@@ -305,16 +324,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       enrolledAt: new Date().toISOString(),
       progressPercent: 0,
       completedLessonIds: [],
-      paymentStatus: isFree ? 'free' : 'approved', // instant unlock in demo mode
+      paymentStatus: isFree ? 'free' : 'approved',
       paymentMethod,
       transactionRef: slipRef || `REF-${Math.floor(100000 + Math.random() * 900000)}`,
     };
 
     setEnrollments((prev) => ({ ...prev, [courseId]: newEnrollment }));
-    setUser((prev) => ({
+    setUser((prev) => (prev ? {
       ...prev,
       enrolledCourseIds: Array.from(new Set([...prev.enrolledCourseIds, courseId])),
-    }));
+    } : null));
 
     setIsPaymentModalOpen(false);
     setPendingPaymentCourseId(null);
@@ -322,7 +341,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCurrentView('course_details');
   };
 
-  const verifyPaymentAdmin = (enrollmentId: string) => {
+  const verifyPaymentAdmin = async (enrollmentId: string) => {
     setEnrollments((prev) => {
       const updated = { ...prev };
       for (const key in updated) {
@@ -332,6 +351,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return updated;
     });
+
+    if (accessToken) {
+      try {
+        await fetch('/api/admin/verify-payment', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ enrollmentId }),
+        });
+      } catch (err) {
+        console.warn('Backend payment verification log notice:', err);
+      }
+    }
   };
 
   const updateLessonProgress = (courseId: string, lessonId: string, timeSeconds: number) => {
@@ -386,6 +417,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const claimCertificate = (courseId: string): Certificate => {
+    if (!user) {
+      openAuthModal(true, 'login');
+      throw new Error('Please sign in to claim your certificate.');
+    }
     const course = courses.find((c) => c.id === courseId);
     const existing = certificates.find((c) => c.courseId === courseId && c.studentId === user.id);
     if (existing) return existing;
@@ -407,16 +442,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setCertificates((prev) => [newCert, ...prev]);
-    setUser((prev) => ({
+    setUser((prev) => (prev ? {
       ...prev,
       completedCourseIds: Array.from(new Set([...prev.completedCourseIds, courseId])),
-    }));
+    } : null));
 
     return newCert;
   };
 
   const saveCourseToggle = (courseId: string) => {
+    if (!user) {
+      openAuthModal(true, 'login');
+      return;
+    }
     setUser((prev) => {
+      if (!prev) return null;
       const isSaved = prev.savedCourseIds.includes(courseId);
       const nextSaved = isSaved
         ? prev.savedCourseIds.filter((id) => id !== courseId)
@@ -426,6 +466,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addCommunityPost = (title: string, content: string, category: string) => {
+    if (!user) {
+      openAuthModal(true, 'login');
+      return;
+    }
     const newPost: CommunityPost = {
       id: `post_${Date.now()}`,
       title,
@@ -442,6 +486,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addCommunityReply = (postId: string, content: string) => {
+    if (!user) {
+      openAuthModal(true, 'login');
+      return;
+    }
     setCommunityPosts((prev) =>
       prev.map((post) => {
         if (post.id === postId) {
@@ -485,12 +533,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         slug: (courseData.title || 'course').toLowerCase().replace(/\s+/g, '-'),
         description: courseData.description || '',
         descriptionMy: courseData.descriptionMy || '',
-        instructor: {
+        instructor: user ? {
           id: user.id,
           name: user.name,
           title: 'Course Instructor',
           avatar: user.avatar,
           bio: user.bio || '',
+        } : {
+          id: 'inst_faculty',
+          name: 'Academic Faculty Lead',
+          title: 'Course Instructor',
+          avatar: '',
+          bio: '',
         },
         duration: courseData.duration || '4 weeks',
         level: courseData.level || 'Beginner',
@@ -533,18 +587,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateUserProfile = (updates: Partial<User>) => {
-    setUser((prev) => ({ ...prev, ...updates }));
+    setUser((prev) => (prev ? { ...prev, ...updates } : null));
   };
 
-  const logout = () => {
-    setUser(INITIAL_USER);
+  const login = (userData: User, token?: string) => {
+    const normalizedEmail = (userData.email || '').trim().toLowerCase();
+    const finalRole: UserRole = normalizedEmail === 'lyrakaelin@gmail.com' ? 'owner' : userData.role;
+    const securedUser: User = { ...userData, role: finalRole };
+
+    setUser(securedUser);
+    localStorage.setItem('ph_user', JSON.stringify(securedUser));
+    if (token) {
+      setAccessToken(token);
+      localStorage.setItem('ph_access_token', token);
+    }
+    setIsAuthModalOpen(false);
+  };
+
+  const logout = async () => {
+    const tokenToInvalidate = accessToken;
+    setUser(null);
+    setAccessToken(null);
+    localStorage.removeItem('ph_user');
+    localStorage.removeItem('ph_access_token');
+    sessionStorage.clear();
+    try {
+      if (isSupabaseConfigured()) {
+        await supabase.auth.signOut();
+      }
+    } catch (e) {
+      console.warn('Supabase signout notice:', e);
+    }
+    if (tokenToInvalidate) {
+      fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${tokenToInvalidate}` },
+      }).catch(() => {});
+    }
     setCurrentView('home');
+    setAuthMode('login');
+    setIsAuthModalOpen(true);
   };
 
   return (
     <AppContext.Provider
       value={{
         user,
+        accessToken,
+        getAuthHeaders,
         language,
         currentView,
         selectedCourseId,
@@ -567,7 +657,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         pendingPaymentCourseId,
         setLanguage,
         setCurrentView,
-        switchRole,
         selectCourse,
         selectCategory,
         selectLesson,
@@ -591,6 +680,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         toggleCategoryStatus,
         addOpportunity,
         updateUserProfile,
+        login,
         logout,
       }}
     >

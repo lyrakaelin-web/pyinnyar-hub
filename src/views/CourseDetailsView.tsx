@@ -34,7 +34,7 @@ export const CourseDetailsView: React.FC = () => {
   const course = courses.find((c) => c.id === selectedCourseId) || courses[0];
   const isEnrolled = !!enrollments[course.id];
   const enrollment = enrollments[course.id];
-  const isSaved = user.savedCourseIds.includes(course.id);
+  const isSaved = user?.savedCourseIds?.includes(course.id) ?? false;
 
   const totalLessons = course.modules.reduce((acc, m) => acc + m.lessons.length, 0);
 

@@ -34,7 +34,7 @@ export const HomeView: React.FC = () => {
   } = useApp();
 
   // Find enrolled courses with active progress
-  const activeEnrolledList = user.enrolledCourseIds
+  const activeEnrolledList = (user?.enrolledCourseIds || [])
     .map((id) => {
       const course = courses.find((c) => c.id === id);
       const enr = enrollments[id];
@@ -47,9 +47,9 @@ export const HomeView: React.FC = () => {
   const featuredCourses = courses.filter((c) => c.isFeatured);
   const freeCourses = courses.filter((c) => c.type === 'free');
   const newCourses = courses.filter((c) => c.isNew || c.id === 'course_lead_01' || c.id === 'course_sign_01');
-  const recommendedCourses = courses.filter((c) =>
-    user.learningPreferences.preferredCategories.includes(c.categoryId)
-  );
+  const recommendedCourses = user?.learningPreferences?.preferredCategories
+    ? courses.filter((c) => user.learningPreferences.preferredCategories.includes(c.categoryId))
+    : courses.filter((c) => c.isFeatured || c.rating >= 4.8);
 
   return (
     <div className="space-y-8 sm:space-y-12 pb-16">

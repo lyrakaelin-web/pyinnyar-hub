@@ -12,7 +12,7 @@ export const CourseCard: React.FC<CourseCardProps> = ({ course }) => {
   const { language, selectCourse, user, enrollments, saveCourseToggle } = useApp();
 
   const isEnrolled = !!enrollments[course.id];
-  const isSaved = user.savedCourseIds.includes(course.id);
+  const isSaved = user?.savedCourseIds?.includes(course.id) ?? false;
   const enrollment = enrollments[course.id];
 
   return (

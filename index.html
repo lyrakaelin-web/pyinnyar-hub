@@ -3,6 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // AI Studio preview environment: Ignore HMR WebSocket connection errors
+      window.addEventListener('unhandledrejection', function(e) {
+        var msg = e && e.reason && (e.reason.message || String(e.reason));
+        if (msg && (msg.indexOf('WebSocket') !== -1 || msg.indexOf('ws:') !== -1 || msg.indexOf('wss:') !== -1)) {
+          e.preventDefault();
+        }
+      });
+      window.addEventListener('error', function(e) {
+        var msg = e && (e.message || '');
+        var file = e && (e.filename || '');
+        if ((msg && msg.indexOf('WebSocket') !== -1) || (file && file.indexOf('@vite/client') !== -1)) {
+          e.preventDefault();
+        }
+      });
+    </script>
     <title>PYINNYAR HUB — Learn Without Limits</title>
     <meta name="description" content="A digital learning platform that makes quality education, professional skills, and global learning opportunities accessible to Myanmar learners." />
     <meta property="og:title" content="PYINNYAR HUB — Learn Without Limits" />

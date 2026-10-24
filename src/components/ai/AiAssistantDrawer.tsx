@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 
 export const AiAssistantDrawer: React.FC = () => {
-  const { isAiAssistantOpen, openAiAssistant, language, courses, selectedCourseId } = useApp();
+  const { isAiAssistantOpen, openAiAssistant, language, courses, selectedCourseId, getAuthHeaders } = useApp();
 
   const [prompt, setPrompt] = useState('');
   const [action, setAction] = useState<'explain' | 'summarize' | 'practice_questions' | 'learning_path' | 'general'>('explain');
@@ -73,7 +73,7 @@ export const AiAssistantDrawer: React.FC = () => {
     try {
       const response = await fetch('/api/ai/assistant', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           prompt: textToSend,
           action: actionType,

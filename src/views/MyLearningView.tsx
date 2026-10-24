@@ -27,22 +27,61 @@ export const MyLearningView: React.FC = () => {
     selectCourse,
     selectCertificate,
     updateUserProfile,
+    openAuthModal,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'enrolled' | 'completed' | 'saved' | 'certificates' | 'quizzes'>('enrolled');
 
+  if (!user) {
+    return (
+      <div className="max-w-md mx-auto my-12 text-center p-8 bg-white rounded-3xl border border-stone-200/90 shadow-sm space-y-5 animate-in fade-in duration-200">
+        <div className="w-16 h-16 rounded-2xl bg-[#14243A] text-[#C7A66A] flex items-center justify-center mx-auto text-2xl font-black shadow-sm">
+          <BookOpen className="w-8 h-8" />
+        </div>
+        <div className="space-y-2">
+          <span className="text-[10px] font-bold tracking-widest text-[#A9874B] uppercase">
+            {t('nav.mylearning', language)}
+          </span>
+          <h2 className="text-xl font-bold text-[#14243A]">
+            {language === 'my' ? 'သင်၏ သင်ခန်းစာများ စတင်ပါ' : 'Track Your Learning Journey'}
+          </h2>
+          <p className="text-xs text-stone-600 leading-relaxed max-w-sm mx-auto">
+            {language === 'my'
+              ? 'သင် စာရင်းသွင်းထားသော သင်ခန်းစာများ၊ တိုးတက်မှုများနှင့် လက်မှတ်များကို ကြည့်ရှုရန် အကောင့်ဝင်ရောက်ပါ။'
+              : 'Sign in to access your enrolled courses, resume lessons where you left off, review quizzes, and claim verified certificates.'}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2.5 pt-2">
+          <button
+            onClick={() => openAuthModal(true, 'login')}
+            className="w-full py-3 bg-[#14243A] text-white rounded-xl text-xs font-bold hover:bg-[#1E3452] transition-colors shadow-xs"
+          >
+            {language === 'my' ? 'အကောင့်ဝင်ရောက်မည်' : 'Sign In'}
+          </button>
+          <button
+            onClick={() => openAuthModal(true, 'register')}
+            className="w-full py-3 border border-stone-300 text-stone-700 bg-stone-50/50 rounded-xl text-xs font-semibold hover:bg-stone-100 transition-colors"
+          >
+            {language === 'my' ? 'အကောင့်အသစ် ဖွင့်မည်' : 'Create Student Account'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // Enrolled courses
-  const enrolledCourses = user.enrolledCourseIds
+  const enrolledCourses = (user.enrolledCourseIds || [])
     .map((id) => courses.find((c) => c.id === id))
     .filter(Boolean) as any[];
 
   // Completed courses
-  const completedCourses = user.completedCourseIds
+  const completedCourses = (user.completedCourseIds || [])
     .map((id) => courses.find((c) => c.id === id))
     .filter(Boolean) as any[];
 
   // Saved courses
-  const savedCourses = user.savedCourseIds
+  const savedCourses = (user.savedCourseIds || [])
     .map((id) => courses.find((c) => c.id === id))
     .filter(Boolean) as any[];
 

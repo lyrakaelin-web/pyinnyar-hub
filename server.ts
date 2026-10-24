@@ -1,7 +1,8 @@
 import express from 'express';
-import type { Request, Response } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
+import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import path from 'path';
 
@@ -11,6 +12,28 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json());
+
+// Strict Designated Founder / Super Admin Email Configuration
+export const OWNER_EMAIL = (process.env.OWNER_EMAIL || 'lyrakaelin@gmail.com').trim().toLowerCase();
+
+// Supabase Admin Client for server-side token and role verification
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+export const supabaseAdmin = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
+  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    })
+  : null;
+
+export interface AuthenticatedRequest extends Request {
+  user?: {
+    id: string;
+    email: string;
+    role: 'owner' | 'admin' | 'instructor' | 'student';
+    name?: string;
+  };
+}
 
 // Initialize Google GenAI client according to AI Studio guidelines
 const ai = new GoogleGenAI({
@@ -58,6 +81,281 @@ app.get('/api/health', (_req: Request, res: Response) => {
     status: 'ok',
     platform: 'PYINNYAR HUB',
     timestamp: new Date().toISOString(),
+  });
+});
+
+// Authentication & Authorization Middlewares
+// STRICT SECURITY ENFORCEMENT: Never trust x-user-email or any client-provided identity header.
+// Every request to protected endpoints MUST supply a valid Supabase JWT Bearer token.
+export const authenticateToken = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+  if (!token) {
+    return res.status(401).json({ error: 'Authentication required. No Bearer token provided in Authorization header.' });
+  }
+
+  if (!supabaseAdmin) {
+    return res.status(503).json({ error: 'Backend database service is not configured with SUPABASE_SERVICE_ROLE_KEY.' });
+  }
+
+  try {
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+    if (error || !user) {
+      return res.status(401).json({ error: 'Invalid, expired, or revoked authentication session token.' });
+    }
+
+    const email = (user.email || '').trim().toLowerCase();
+    const isOwner = email === OWNER_EMAIL;
+    let role: 'owner' | 'admin' | 'instructor' | 'student' = isOwner ? 'owner' : 'student';
+
+    try {
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('role, name')
+        .eq('id', user.id)
+        .single();
+      
+      if (profile?.role) {
+        // Enforce that only the designated OWNER_EMAIL can ever possess the 'owner' role
+        if (profile.role === 'owner' && !isOwner) {
+          role = 'student';
+        } else {
+          role = isOwner ? 'owner' : profile.role;
+        }
+      }
+    } catch {
+      // In case database table is pending migration, fallback safely
+      role = isOwner ? 'owner' : 'student';
+    }
+
+    req.user = {
+      id: user.id,
+      email,
+      role,
+      name: user.user_metadata?.name || '',
+    };
+    return next();
+  } catch {
+    return res.status(401).json({ error: 'Authentication verification failure.' });
+  }
+};
+
+export const requireOwner = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Authentication required.' });
+  }
+  if (req.user.role !== 'owner' || req.user.email.toLowerCase() !== OWNER_EMAIL) {
+    return res.status(403).json({ error: 'Access denied: Founder & Super Admin authorization required.' });
+  }
+  next();
+};
+
+export const requireAdmin = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Authentication required.' });
+  }
+  if (req.user.role !== 'admin' && req.user.role !== 'owner') {
+    return res.status(403).json({ error: 'Access denied: Administrator authorization required.' });
+  }
+  next();
+};
+
+export const requireInstructor = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Authentication required.' });
+  }
+  if (!['owner', 'admin', 'instructor'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Access denied: Instructor authorization required.' });
+  }
+  next();
+};
+
+// Real Supabase Authentication Endpoints (Zero Mock Data)
+app.post('/api/auth/login', async (req: Request, res: Response) => {
+  const { email, password } = req.body || {};
+  if (!email || typeof email !== 'string' || !password || typeof password !== 'string') {
+    return res.status(400).json({ error: 'Please enter both email and password.' });
+  }
+
+  if (!supabaseAdmin) {
+    return res.status(503).json({
+      error: 'Supabase authentication service is not connected. Please provide SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in server environment.',
+    });
+  }
+
+  try {
+    const normalizedEmail = email.trim().toLowerCase();
+    const { data, error } = await supabaseAdmin.auth.signInWithPassword({
+      email: normalizedEmail,
+      password,
+    });
+
+    if (error || !data.user || !data.session) {
+      return res.status(401).json({ error: error?.message || 'Invalid email or password.' });
+    }
+
+    const isOwner = normalizedEmail === OWNER_EMAIL;
+    let role: 'owner' | 'admin' | 'instructor' | 'student' = isOwner ? 'owner' : 'student';
+
+    try {
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('role, name, avatar_url')
+        .eq('id', data.user.id)
+        .single();
+
+      if (profile?.role) {
+        role = (profile.role === 'owner' && !isOwner) ? 'student' : (isOwner ? 'owner' : profile.role);
+      }
+    } catch {
+      // Table pending migration
+    }
+
+    return res.json({
+      success: true,
+      session: {
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+        expires_at: data.session.expires_at,
+      },
+      user: {
+        id: data.user.id,
+        name: data.user.user_metadata?.name || normalizedEmail.split('@')[0],
+        email: data.user.email,
+        role,
+        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Authentication failed.' });
+  }
+});
+
+app.post('/api/auth/register', async (req: Request, res: Response) => {
+  const { name, email, password } = req.body || {};
+  if (!name || typeof name !== 'string' || !email || typeof email !== 'string' || !password || typeof password !== 'string') {
+    return res.status(400).json({ error: 'Please provide full name, email, and password.' });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+  }
+
+  if (!supabaseAdmin) {
+    return res.status(503).json({
+      error: 'Supabase authentication service is not connected. Please provide SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in server environment.',
+    });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+
+  try {
+    // Public registration strictly registers as student via Supabase Auth.
+    // Client-supplied roles are completely ignored and cannot escalate.
+    const { data, error } = await supabaseAdmin.auth.signUp({
+      email: normalizedEmail,
+      password,
+      options: {
+        data: {
+          name: name.trim(),
+        },
+      },
+    });
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Account registered successfully. If email verification is enabled, please confirm via your inbox.',
+      user: data.user ? {
+        id: data.user.id,
+        name: name.trim(),
+        email: data.user.email,
+        role: 'student',
+      } : null,
+      session: data.session ? {
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      } : null,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Registration failed.' });
+  }
+});
+
+app.post('/api/auth/logout', (_req: Request, res: Response) => {
+  return res.json({ success: true, message: 'Session terminated successfully.' });
+});
+
+// Protected Administration & Role Management Endpoints
+app.post('/api/admin/promote-role', authenticateToken, requireOwner, async (req: AuthenticatedRequest, res: Response) => {
+  const { targetEmail, newRole } = req.body || {};
+
+  if (!targetEmail || !['admin', 'instructor', 'student'].includes(newRole)) {
+    return res.status(400).json({ error: 'Valid targetEmail and role (admin, instructor, student) required.' });
+  }
+
+  const normalizedTarget = (targetEmail as string).trim().toLowerCase();
+  if (normalizedTarget === OWNER_EMAIL) {
+    return res.status(400).json({ error: 'Founder & Super Admin account role cannot be modified.' });
+  }
+
+  if (supabaseAdmin) {
+    try {
+      const { error } = await supabaseAdmin
+        .from('profiles')
+        .update({ role: newRole, updated_at: new Date().toISOString() })
+        .eq('email', normalizedTarget);
+
+      if (error) {
+        return res.status(500).json({ error: `Database role update failed: ${error.message}` });
+      }
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message || 'Database update failed.' });
+    }
+  }
+
+  return res.json({
+    success: true,
+    message: `User ${normalizedTarget} authorized as ${newRole} by Founder & Super Admin.`,
+    targetEmail: normalizedTarget,
+    newRole,
+  });
+});
+
+app.post('/api/admin/verify-payment', authenticateToken, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const { enrollmentId } = req.body || {};
+  if (!enrollmentId) {
+    return res.status(400).json({ error: 'Enrollment ID required.' });
+  }
+
+  if (supabaseAdmin) {
+    try {
+      const { error } = await supabaseAdmin
+        .from('enrollments')
+        .update({
+          payment_status: 'verified',
+          verified_by: req.user?.id,
+          verified_at: new Date().toISOString(),
+        })
+        .eq('id', enrollmentId);
+
+      if (error) {
+        return res.status(500).json({ error: `Database payment update failed: ${error.message}` });
+      }
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message || 'Database update failed.' });
+    }
+  }
+
+  return res.json({
+    success: true,
+    message: `Payment enrollment ${enrollmentId} verified by authorized administrator ${req.user?.name || req.user?.email}.`,
+    verifiedBy: req.user?.email,
+    verifiedAt: new Date().toISOString(),
   });
 });
 
@@ -150,7 +448,10 @@ async function startServer() {
 
   if (isDev) {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: false,
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);

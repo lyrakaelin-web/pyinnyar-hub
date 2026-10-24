@@ -1,4 +1,4 @@
-export type UserRole = 'student' | 'instructor' | 'admin';
+export type UserRole = 'owner' | 'admin' | 'instructor' | 'student';
 
 export type Language = 'en' | 'my';
 
