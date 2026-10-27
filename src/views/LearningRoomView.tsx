@@ -20,6 +20,7 @@ import {
   X,
   AlertCircle,
   Menu,
+  Lock,
 } from 'lucide-react';
 
 export const LearningRoomView: React.FC = () => {
@@ -29,6 +30,7 @@ export const LearningRoomView: React.FC = () => {
     courses,
     enrollments,
     language,
+    user,
     selectLesson,
     markLessonComplete,
     updateLessonProgress,
@@ -41,6 +43,60 @@ export const LearningRoomView: React.FC = () => {
 
   const course = courses.find((c) => c.id === selectedCourseId) || courses[0];
   const enrollment = enrollments[course.id];
+
+  const isPrivileged = user?.role === 'owner' || user?.role === 'admin';
+  const isCourseFree = course.priceMMK === 0;
+  const isApproved = isPrivileged || isCourseFree || (enrollment && (enrollment.paymentStatus === 'approved' || enrollment.paymentStatus === 'free'));
+
+  if (!isApproved) {
+    const isPending = enrollment && enrollment.paymentStatus === 'pending_verification';
+    const isRejected = enrollment && enrollment.paymentStatus === 'rejected';
+
+    return (
+      <div className="max-w-xl mx-auto py-16 px-4 text-center space-y-5 animate-in fade-in duration-200">
+        <div className="w-16 h-16 rounded-3xl bg-amber-100 flex items-center justify-center mx-auto text-amber-800 shadow-xs">
+          <Lock className="w-8 h-8" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-xl sm:text-2xl font-bold text-[#14243A]">
+            {isPending
+              ? (language === 'my' ? 'ငွေလွှဲစစ်ဆေးဆဲ ဖြစ်ပါသည်' : 'Payment Verification Pending')
+              : isRejected
+              ? (language === 'my' ? 'ငွေလွှဲစစ်ဆေးမှု မအောင်မြင်ပါ' : 'Payment Verification Declined')
+              : (language === 'my' ? 'သင်ခန်းစာလေ့လာခွင့် မရရှိသေးပါ' : 'Course Access Locked')}
+          </h2>
+          <p className="text-sm text-stone-600 max-w-md mx-auto leading-relaxed">
+            {isPending
+              ? (language === 'my'
+                ? 'သင်၏ ငွေလွှဲပြေစာကို စီမံခန့်ခွဲသူ (Admin/Owner) မှ လူကိုယ်တိုင် စစ်ဆေးအတည်ပြုနေပါသည်။ အတည်ပြုပြီးမှသာ ဤသင်ခန်းစာခန်းမကို ဖွင့်လှစ်ပေးပါမည်။'
+                : 'Your payment slip is currently under manual review by PYINNYAR HUB Academic Operations. Course access is unlocked once an authorized Admin or Owner verifies the transfer.')
+              : isRejected
+              ? (language === 'my'
+                ? `အကြောင်းပြချက်: ${enrollment?.rejectionReason || 'ငွေလွှဲအချက်အလက် မကိုက်ညီပါ'}။ ပြေစာအသစ်တင်ပါ သို့မဟုတ် Refund တောင်းခံပါ။`
+                : `Reviewer explanation: ${enrollment?.rejectionReason || 'Receipt details could not be matched.'}. Please resubmit receipt or request a refund.`)
+              : (language === 'my'
+                ? 'ဤသင်တန်းကို လေ့လာရန် ဦးစွာ စာရင်းသွင်းပြီး ငွေလွှဲအတည်ပြုချက် ရယူရန် လိုအပ်ပါသည်။'
+                : 'Enrollment and payment approval are required to access this course.')}
+          </p>
+        </div>
+
+        <div className="flex items-center justify-center gap-3 pt-3">
+          <button
+            onClick={() => setCurrentView('course_details')}
+            className="px-5 py-2.5 rounded-xl bg-[#14243A] text-white text-xs font-bold hover:bg-[#1E3452] shadow-xs"
+          >
+            {language === 'my' ? 'သင်တန်းအသေးစိတ်သို့ သွားမည်' : 'View Course Details'}
+          </button>
+          <button
+            onClick={() => setCurrentView('explore')}
+            className="px-5 py-2.5 rounded-xl border border-stone-300 text-stone-700 text-xs font-semibold hover:bg-stone-50"
+          >
+            {language === 'my' ? 'အခြားသင်တန်းများ ရှာဖွေမည်' : 'Explore Courses'}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Flatten all lessons
   const allLessons: Lesson[] = [];

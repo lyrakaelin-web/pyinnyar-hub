@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Header } from './components/navigation/Header';
 import { BottomNav } from './components/navigation/BottomNav';
 import { AiAssistantDrawer } from './components/ai/AiAssistantDrawer';
 import { PaymentModal } from './components/modals/PaymentModal';
 import { AuthModal } from './components/modals/AuthModal';
+import { initCapacitorApp, registerBackButtonHandler } from './utils/mobileInit';
 
 import { HomeView } from './views/HomeView';
 import { ExploreView } from './views/ExploreView';
@@ -20,8 +21,32 @@ import { CertificateView } from './views/CertificateView';
 const MainLayout: React.FC = () => {
   const { currentView, setCurrentView, language } = useApp();
 
+  // Initialize native Capacitor plugins once on mount
+  useEffect(() => {
+    initCapacitorApp();
+  }, []);
+
+  // Manage Android hardware back button handler for active view with clean unregister
+  useEffect(() => {
+    const unregister = registerBackButtonHandler(() => {
+      // If student is deep inside a course view, back returns to explore catalog
+      if (currentView === 'course_details' || currentView === 'learning_room' || currentView === 'certificate_view') {
+        setCurrentView('explore');
+        return true;
+      }
+      // If on another tab, back returns to home
+      if (currentView !== 'home') {
+        setCurrentView('home');
+        return true;
+      }
+      return false;
+    });
+
+    return unregister;
+  }, [currentView, setCurrentView]);
+
   return (
-    <div className="min-h-screen bg-[#F8F9FA] text-[#14243A] flex flex-col font-sans selection:bg-[#C7A66A]/30">
+    <div className="min-h-screen bg-[#F8F9FA] text-[#14243A] flex flex-col font-sans selection:bg-[#C7A66A]/30 pt-[env(safe-area-inset-top,0px)]">
       {/* Top Header compliant with Top Bar Contract */}
       <Header />
 

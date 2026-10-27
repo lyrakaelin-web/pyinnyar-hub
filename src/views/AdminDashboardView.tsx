@@ -19,7 +19,12 @@ import {
   X,
   Clock,
   Sparkles,
+  XCircle,
+  AlertCircle,
+  History,
+  Check,
 } from 'lucide-react';
+import { apiUrl } from '../utils/api';
 
 export const AdminDashboardView: React.FC = () => {
   const {
@@ -31,6 +36,7 @@ export const AdminDashboardView: React.FC = () => {
     addOrUpdateCourse,
     deleteCourse,
     toggleCategoryStatus,
+    reviewPayment,
     verifyPaymentAdmin,
     addOpportunity,
     language,
@@ -46,6 +52,14 @@ export const AdminDashboardView: React.FC = () => {
   const [roleToAssign, setRoleToAssign] = useState<'admin' | 'instructor'>('instructor');
   const [roleActionStatus, setRoleActionStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isPromotingRole, setIsPromotingRole] = useState(false);
+
+  // Payment Manual Review States
+  const [paymentSubTab, setPaymentSubTab] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
+  const [rejectingEnrollmentId, setRejectingEnrollmentId] = useState<string | null>(null);
+  const [rejectionReasonText, setRejectionReasonText] = useState('');
+  const [reviewMessage, setReviewMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [historyEnrollmentId, setHistoryEnrollmentId] = useState<string | null>(null);
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
   // Modal for new/edit course
   const [isCourseModalOpen, setIsCourseModalOpen] = useState(false);
@@ -176,11 +190,52 @@ export const AdminDashboardView: React.FC = () => {
     setIsCourseModalOpen(false);
   };
 
-  const pendingPayments = Object.values(enrollments).filter(
+  const allEnrollmentsList = Object.values(enrollments);
+  const pendingPayments = allEnrollmentsList.filter(
     (enr) => enr.paymentStatus === 'pending_verification'
   );
+  const approvedPayments = allEnrollmentsList.filter(
+    (enr) => enr.paymentStatus === 'approved' || enr.paymentStatus === 'free'
+  );
+  const rejectedPayments = allEnrollmentsList.filter(
+    (enr) => enr.paymentStatus === 'rejected'
+  );
+
+  const filteredPayments = paymentSubTab === 'pending'
+    ? pendingPayments
+    : paymentSubTab === 'approved'
+    ? approvedPayments
+    : paymentSubTab === 'rejected'
+    ? rejectedPayments
+    : allEnrollmentsList;
 
   const flaggedPosts = communityPosts.filter((p) => p.isFlagged);
+
+  const handleApprovePayment = async (enrollmentId: string) => {
+    setIsProcessingPayment(true);
+    setReviewMessage(null);
+    const res = await reviewPayment(enrollmentId, 'approve');
+    setIsProcessingPayment(false);
+    setReviewMessage({
+      type: res.success ? 'success' : 'error',
+      text: res.message,
+    });
+  };
+
+  const handleConfirmReject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rejectingEnrollmentId || !rejectionReasonText.trim()) return;
+    setIsProcessingPayment(true);
+    setReviewMessage(null);
+    const res = await reviewPayment(rejectingEnrollmentId, 'reject', rejectionReasonText.trim());
+    setIsProcessingPayment(false);
+    setRejectingEnrollmentId(null);
+    setRejectionReasonText('');
+    setReviewMessage({
+      type: res.success ? 'success' : 'error',
+      text: res.message,
+    });
+  };
 
   return (
     <div className="space-y-6 pb-20">
@@ -360,21 +415,399 @@ export const AdminDashboardView: React.FC = () => {
       )}
 
       {activeAdminTab === 'payments' && (
-        <div className="bg-white rounded-2xl border border-stone-200/90 overflow-hidden shadow-xs">
-          <div className="p-4 bg-stone-50 border-b border-stone-200">
-            <h3 className="font-bold text-xs uppercase tracking-wider text-stone-700">
-              Student Enrollment & Slip Verifications
-            </h3>
+        <div className="bg-white rounded-2xl border border-stone-200/90 overflow-hidden shadow-xs space-y-4 p-5">
+          {/* Header & Review Notification Message */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-stone-100">
+            <div>
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-[#A9874B]" />
+                <h3 className="font-bold text-sm text-[#14243A]">
+                  Manual Payment Review & Receipt Verification Portal
+                </h3>
+              </div>
+              <p className="text-xs text-stone-500 mt-0.5">
+                Strict Security Protocol: Automatic approval is disabled. Course access is unlocked ONLY upon manual verification by an authorized Admin or Owner.
+              </p>
+            </div>
+
+            {/* Sub Filter Navigation */}
+            <div className="flex items-center gap-1 bg-stone-100 p-1 rounded-xl text-xs shrink-0">
+              <button
+                onClick={() => setPaymentSubTab('pending')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-colors ${
+                  paymentSubTab === 'pending'
+                    ? 'bg-[#14243A] text-white shadow-xs'
+                    : 'text-stone-600 hover:text-stone-900'
+                }`}
+              >
+                Pending ({pendingPayments.length})
+              </button>
+              <button
+                onClick={() => setPaymentSubTab('approved')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-colors ${
+                  paymentSubTab === 'approved'
+                    ? 'bg-[#14243A] text-white shadow-xs'
+                    : 'text-stone-600 hover:text-stone-900'
+                }`}
+              >
+                Approved ({approvedPayments.length})
+              </button>
+              <button
+                onClick={() => setPaymentSubTab('rejected')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-colors ${
+                  paymentSubTab === 'rejected'
+                    ? 'bg-[#14243A] text-white shadow-xs'
+                    : 'text-stone-600 hover:text-stone-900'
+                }`}
+              >
+                Declined ({rejectedPayments.length})
+              </button>
+              <button
+                onClick={() => setPaymentSubTab('all')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-colors ${
+                  paymentSubTab === 'all'
+                    ? 'bg-[#14243A] text-white shadow-xs'
+                    : 'text-stone-600 hover:text-stone-900'
+                }`}
+              >
+                All ({allEnrollmentsList.length})
+              </button>
+            </div>
           </div>
 
-          <div className="p-6 text-center text-xs text-stone-500 space-y-2">
-            <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto" />
-            <p className="font-bold text-stone-800">
-              All active enrollments are approved and verified.
-            </p>
-            <p className="text-[11px] text-stone-400">
-              In production, KBZPay and WavePay webhook notifications automatically confirm transactions.
-            </p>
+          {reviewMessage && (
+            <div
+              className={`p-3 rounded-xl text-xs flex items-center justify-between ${
+                reviewMessage.type === 'success'
+                  ? 'bg-emerald-50 text-emerald-900 border border-emerald-200'
+                  : 'bg-red-50 text-red-900 border border-red-200'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                {reviewMessage.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                )}
+                <span>{reviewMessage.text}</span>
+              </div>
+              <button
+                onClick={() => setReviewMessage(null)}
+                className="text-stone-400 hover:text-stone-700 p-1"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* Payments Table / List */}
+          {filteredPayments.length === 0 ? (
+            <div className="p-8 text-center text-xs text-stone-500 space-y-2">
+              <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto" />
+              <p className="font-bold text-stone-800">
+                No payments currently matching "{paymentSubTab}" filter.
+              </p>
+              <p className="text-[11px] text-stone-400">
+                All submitted receipts have been processed in accordance with the manual review protocol.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {filteredPayments.map((enr) => {
+                const targetCourse = courses.find((c) => c.id === enr.courseId);
+                return (
+                  <div
+                    key={enr.id}
+                    className="p-4 rounded-xl border border-stone-200/90 bg-stone-50/50 hover:bg-stone-50 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs"
+                  >
+                    <div className="space-y-1.5 min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-stone-900 text-sm">
+                          {targetCourse ? (language === 'my' && targetCourse.titleMy ? targetCourse.titleMy : targetCourse.title) : enr.courseId}
+                        </span>
+
+                        {enr.paymentStatus === 'pending_verification' && (
+                          <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-bold text-[10px] uppercase tracking-wider">
+                            Pending Review
+                          </span>
+                        )}
+                        {enr.paymentStatus === 'approved' && (
+                          <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 font-bold text-[10px] uppercase tracking-wider">
+                            Approved
+                          </span>
+                        )}
+                        {enr.paymentStatus === 'rejected' && (
+                          <span className="px-2 py-0.5 rounded bg-red-100 text-red-900 font-bold text-[10px] uppercase tracking-wider">
+                            Rejected
+                          </span>
+                        )}
+                        {enr.paymentStatus === 'free' && (
+                          <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-900 font-bold text-[10px] uppercase tracking-wider">
+                            Free Course
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3 text-stone-600 text-[11px]">
+                        <span>Student ID: <code className="font-mono text-stone-800">{enr.studentId}</code></span>
+                        <span>·</span>
+                        <span>Method: <strong className="text-stone-800">{(enr.paymentMethod || 'kpay').toUpperCase()}</strong></span>
+                        <span>·</span>
+                        <span>Ref: <strong className="font-mono text-stone-900">{enr.transactionRef || 'N/A'}</strong></span>
+                        <span>·</span>
+                        <span>Submitted: {new Date(enr.enrolledAt).toLocaleString()}</span>
+                      </div>
+
+                      {enr.refundRequested && (
+                        <div className="p-2 rounded-lg bg-amber-100/70 border border-amber-300 text-amber-900 text-[11px] flex items-center gap-1.5">
+                          <AlertCircle className="w-3.5 h-3.5 text-amber-800 shrink-0" />
+                          <span>
+                            <strong>Refund Requested by Student:</strong> "{enr.refundReason}"
+                          </span>
+                        </div>
+                      )}
+
+                      {enr.rejectionReason && (
+                        <div className="text-[11px] text-red-700 bg-red-50 p-2 rounded border border-red-200">
+                          <strong>Rejection Note:</strong> {enr.rejectionReason}
+                          {enr.reviewedBy && (
+                            <span className="text-stone-500 block text-[10px] mt-0.5">
+                              Decision by {enr.reviewedBy} at {new Date(enr.reviewedAt || Date.now()).toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {enr.paymentStatus === 'approved' && enr.reviewedBy && (
+                        <div className="text-[10px] text-stone-500">
+                          Approved by {enr.reviewedBy} at {new Date(enr.reviewedAt || Date.now()).toLocaleString()}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Action Controls for Staff */}
+                    <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                      <button
+                        onClick={() => setHistoryEnrollmentId(enr.id)}
+                        className="p-2 rounded-xl border border-stone-300 text-stone-600 hover:bg-stone-100 flex items-center gap-1 text-[11px] font-semibold"
+                        title="View Complete Audit Log"
+                      >
+                        <History className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Audit Log</span>
+                      </button>
+
+                      {enr.paymentStatus === 'pending_verification' && (
+                        <>
+                          <button
+                            onClick={() => handleApprovePayment(enr.id)}
+                            disabled={isProcessingPayment}
+                            className="px-3 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center gap-1 shadow-xs disabled:opacity-50"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Approve Access</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setRejectingEnrollmentId(enr.id);
+                              setRejectionReasonText('');
+                            }}
+                            disabled={isProcessingPayment}
+                            className="px-3 py-2 rounded-xl bg-red-700 hover:bg-red-800 text-white font-bold text-xs flex items-center gap-1 shadow-xs disabled:opacity-50"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                            <span>Reject Receipt</span>
+                          </button>
+                        </>
+                      )}
+
+                      {enr.paymentStatus === 'rejected' && (
+                        <button
+                          onClick={() => handleApprovePayment(enr.id)}
+                          disabled={isProcessingPayment}
+                          className="px-3 py-2 rounded-xl border border-emerald-600 text-emerald-800 hover:bg-emerald-50 font-bold text-xs"
+                        >
+                          Override & Approve
+                        </button>
+                      )}
+
+                      {enr.paymentStatus === 'approved' && enr.paymentMethod !== 'none' && (
+                        <button
+                          onClick={() => {
+                            setRejectingEnrollmentId(enr.id);
+                            setRejectionReasonText('Access revoked pending receipt re-verification.');
+                          }}
+                          disabled={isProcessingPayment}
+                          className="px-2.5 py-1.5 rounded-lg border border-stone-300 text-stone-600 hover:bg-stone-100 text-[11px]"
+                        >
+                          Revoke Access
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Reject Payment with Mandatory Explanation Modal */}
+      {rejectingEnrollmentId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+              <div className="flex items-center gap-2">
+                <XCircle className="w-5 h-5 text-red-600" />
+                <h3 className="font-bold text-base text-[#14243A]">
+                  Decline Payment Verification
+                </h3>
+              </div>
+              <button
+                onClick={() => setRejectingEnrollmentId(null)}
+                className="w-8 h-8 rounded-full hover:bg-stone-100 flex items-center justify-center text-stone-400 hover:text-stone-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmReject} className="space-y-3 text-xs">
+              <p className="text-stone-600 leading-relaxed text-[11px]">
+                Under the platform security guidelines, rejecting a payment requires a clear written explanation. This note will be recorded in the audit history and displayed directly to the student so they can correct their submission or claim a refund.
+              </p>
+
+              <div>
+                <label className="block font-bold text-stone-700 mb-1">
+                  Rejection Explanation (Required):
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  value={rejectionReasonText}
+                  onChange={(e) => setRejectionReasonText(e.target.value)}
+                  placeholder="e.g. Incomplete transfer amount (received 15,000 MMK instead of 45,000 MMK). Please send remainder or request a refund."
+                  className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:ring-2 focus:ring-red-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Quick Template Chips */}
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold text-stone-500 uppercase tracking-wider block">
+                  Quick Explanation Templates:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    'Transferred amount is incomplete for this course.',
+                    'Transaction reference code does not match merchant statement.',
+                    'Payment slip image was illegible or corrupted.',
+                    'Transferred to personal account instead of PYINNYAR HUB merchant.',
+                  ].map((tpl) => (
+                    <button
+                      key={tpl}
+                      type="button"
+                      onClick={() => setRejectionReasonText(tpl)}
+                      className="px-2 py-1 rounded-md bg-stone-100 hover:bg-stone-200 text-stone-700 text-[10px] text-left transition-colors"
+                    >
+                      {tpl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setRejectingEnrollmentId(null)}
+                  className="px-4 py-2 rounded-xl text-stone-600 hover:bg-stone-100 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isProcessingPayment || !rejectionReasonText.trim()}
+                  className="px-5 py-2 rounded-xl bg-red-700 text-white font-bold hover:bg-red-800 disabled:opacity-50 shadow-xs"
+                >
+                  {isProcessingPayment ? 'Processing...' : 'Confirm Rejection'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Audit History Modal */}
+      {historyEnrollmentId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+              <div className="flex items-center gap-2">
+                <History className="w-5 h-5 text-[#14243A]" />
+                <h3 className="font-bold text-base text-[#14243A]">
+                  Payment Audit & History Log
+                </h3>
+              </div>
+              <button
+                onClick={() => setHistoryEnrollmentId(null)}
+                className="w-8 h-8 rounded-full hover:bg-stone-100 flex items-center justify-center text-stone-400 hover:text-stone-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {(() => {
+              const targetEnr = allEnrollmentsList.find((e) => e.id === historyEnrollmentId);
+              const history = targetEnr?.history || [];
+
+              return (
+                <div className="space-y-3 text-xs">
+                  <div className="p-3 rounded-xl bg-stone-50 border border-stone-200 flex items-center justify-between">
+                    <div>
+                      <span className="font-bold text-stone-900 block">Enrollment ID: {historyEnrollmentId}</span>
+                      <span className="text-stone-500 text-[11px]">Course: {targetEnr?.courseId}</span>
+                    </div>
+                    <span className="font-mono font-bold text-stone-800 bg-white px-2.5 py-1 rounded border border-stone-200">
+                      {targetEnr?.paymentStatus.toUpperCase()}
+                    </span>
+                  </div>
+
+                  {history.length === 0 ? (
+                    <div className="py-6 text-center text-stone-500">
+                      No status transitions recorded yet. Initial submission status active.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                      {history.map((rec, i) => (
+                        <div key={i} className="p-3 rounded-xl bg-stone-50/80 border border-stone-200 space-y-1">
+                          <div className="flex items-center justify-between font-semibold text-stone-900">
+                            <span className="capitalize">{rec.status}</span>
+                            <span className="text-[10px] text-stone-500 font-normal">
+                              {new Date(rec.changedAt).toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-stone-600">
+                            Action by: <span className="font-medium text-stone-800">{rec.changedBy}</span>
+                          </div>
+                          {rec.note && (
+                            <p className="text-[11px] text-stone-700 bg-white p-2 rounded border border-stone-100 italic">
+                              "{rec.note}"
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="pt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setHistoryEnrollmentId(null)}
+                      className="px-5 py-2 rounded-xl bg-[#14243A] text-white font-bold hover:bg-[#1E3452]"
+                    >
+                      Close Log
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -448,7 +881,7 @@ export const AdminDashboardView: React.FC = () => {
               setRoleActionStatus(null);
 
               try {
-                const res = await fetch('/api/admin/promote-role', {
+                const res = await fetch(apiUrl('/api/admin/promote-role'), {
                   method: 'POST',
                   headers: getAuthHeaders(),
                   body: JSON.stringify({

@@ -186,9 +186,17 @@ export const PaymentModal: React.FC = () => {
             </div>
           </div>
 
-          {/* Compliance note */}
-          <div className="p-3 bg-stone-100 rounded-xl text-[11px] text-stone-500 leading-tight">
-            <strong>System Disclosure:</strong> Live direct merchant API gateways for KBZPay/WavePay will be configured on production host with commercial merchant credentials. In this demo, access unlocks immediately upon submission.
+          {/* Compliance & Verification Policy Note */}
+          <div className="p-3 bg-amber-50/80 border border-amber-200/80 rounded-xl text-[11px] text-stone-700 leading-relaxed space-y-1">
+            <div className="font-bold text-amber-900 flex items-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-amber-700" />
+              <span>{language === 'my' ? 'စိစစ်အတည်ပြုခြင်းဆိုင်ရာ မူဝါဒ (Manual Review Only)' : 'Manual Review Verification Policy'}</span>
+            </div>
+            <p>
+              {language === 'my'
+                ? 'ငွေလွှဲပြေစာ ပေးပို့ပြီးပါက အခြေအနေကို "Pending (စစ်ဆေးဆဲ)" ဟု သတ်မှတ်ပါမည်။ တာဝန်ခံ Admin/Owner မှ ပြေစာကို လူကိုယ်တိုင် စစ်ဆေးအတည်ပြုပြီးမှသာ သင်ခန်းစာလေ့လာခွင့် ပွင့်ပါမည်။ ငွေလွှဲမှားမိပါကလည်း Refund တောင်းခံနိုင်ပါသည်။'
+                : 'Upon submission, your receipt status is set to "Pending". Automatic activation is disabled. Course access will be unlocked only after an authorized Admin or Owner reviews and approves the transaction. Accidental or mistaken payments are eligible for refund review.'}
+            </p>
           </div>
 
           <div className="pt-2 flex items-center justify-end gap-2">

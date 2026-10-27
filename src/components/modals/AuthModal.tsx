@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { t } from '../../utils/translations';
+import { apiUrl } from '../../utils/api';
 import { X, Mail, Lock, User, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
 export const AuthModal: React.FC = () => {
@@ -193,7 +194,7 @@ export const AuthModal: React.FC = () => {
       }
 
       // Backend API endpoint proxy when client SDK is awaiting credentials
-      const endpoint = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
+      const endpoint = apiUrl(mode === 'login' ? '/api/auth/login' : '/api/auth/register');
       const body =
         mode === 'login'
           ? { email: normalizedEmail, password }

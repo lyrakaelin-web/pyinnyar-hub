@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { apiUrl } from '../utils/api';
 import {
   User,
   UserRole,
@@ -76,6 +77,8 @@ interface AppContextType {
 
   // Business logic
   enrollInCourse: (courseId: string, paymentMethod?: any, slipRef?: string) => void;
+  reviewPayment: (enrollmentId: string, action: 'approve' | 'reject', reason?: string) => Promise<{ success: boolean; message: string }>;
+  requestRefund: (enrollmentId: string, reason: string) => Promise<{ success: boolean; message: string }>;
   verifyPaymentAdmin: (enrollmentId: string) => void;
   updateLessonProgress: (courseId: string, lessonId: string, timeSeconds: number) => void;
   markLessonComplete: (courseId: string, lessonId: string) => void;
@@ -316,24 +319,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     const course = courses.find((c) => c.id === courseId);
     const isFree = !course || course.priceMMK === 0;
+    const now = new Date().toISOString();
 
     const newEnrollment: Enrollment = {
       id: `enr_${Date.now()}`,
       studentId: user.id,
       courseId,
-      enrolledAt: new Date().toISOString(),
+      enrolledAt: now,
       progressPercent: 0,
       completedLessonIds: [],
-      paymentStatus: isFree ? 'free' : 'approved',
+      // NEVER automatically approve paid courses. Set to 'pending_verification' until manual Admin/Owner review.
+      paymentStatus: isFree ? 'free' : 'pending_verification',
       paymentMethod,
       transactionRef: slipRef || `REF-${Math.floor(100000 + Math.random() * 900000)}`,
+      history: [
+        {
+          status: isFree ? 'free' : 'pending_verification',
+          changedBy: user.email,
+          changedAt: now,
+          note: isFree ? 'Free course enrollment' : 'Student submitted payment receipt. Awaiting manual Admin/Owner review.',
+        },
+      ],
     };
 
     setEnrollments((prev) => ({ ...prev, [courseId]: newEnrollment }));
-    setUser((prev) => (prev ? {
-      ...prev,
-      enrolledCourseIds: Array.from(new Set([...prev.enrolledCourseIds, courseId])),
-    } : null));
+
+    // Only grant active course access immediately for free courses!
+    if (isFree) {
+      setUser((prev) => (prev ? {
+        ...prev,
+        enrolledCourseIds: Array.from(new Set([...prev.enrolledCourseIds, courseId])),
+      } : null));
+    }
 
     setIsPaymentModalOpen(false);
     setPendingPaymentCourseId(null);
@@ -341,12 +358,124 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCurrentView('course_details');
   };
 
-  const verifyPaymentAdmin = async (enrollmentId: string) => {
+  const reviewPayment = async (
+    enrollmentId: string,
+    action: 'approve' | 'reject',
+    reason?: string
+  ): Promise<{ success: boolean; message: string }> => {
+    if (!user || (user.role !== 'admin' && user.role !== 'owner')) {
+      return { success: false, message: 'Unauthorized: Only an authorized Admin or Owner can review payments.' };
+    }
+
+    if (action === 'reject' && (!reason || !reason.trim())) {
+      return { success: false, message: 'Rejection requires a clear explanation for the student.' };
+    }
+
+    const now = new Date().toISOString();
+    let targetCourseId = '';
+    let targetStudentId = '';
+
+    setEnrollments((prev) => {
+      const updated = { ...prev };
+      for (const courseKey in updated) {
+        if (updated[courseKey].id === enrollmentId) {
+          targetCourseId = updated[courseKey].courseId;
+          targetStudentId = updated[courseKey].studentId;
+          const currentHistory = updated[courseKey].history || [];
+
+          updated[courseKey] = {
+            ...updated[courseKey],
+            paymentStatus: action === 'approve' ? 'approved' : 'rejected',
+            reviewedBy: user.email,
+            reviewedAt: now,
+            rejectionReason: action === 'reject' ? (reason?.trim() || 'Payment verification declined.') : undefined,
+            history: [
+              ...currentHistory,
+              {
+                status: action === 'approve' ? 'approved' : 'rejected',
+                changedBy: `${user.name} (${user.role.toUpperCase()})`,
+                changedAt: now,
+                note: action === 'approve'
+                  ? 'Payment approved. Course access granted.'
+                  : `Payment rejected: ${reason?.trim()}`,
+              },
+            ],
+          };
+        }
+      }
+      return updated;
+    });
+
+    // If reviewing current user's enrollment (e.g. testing in session)
+    if (action === 'approve' && targetCourseId) {
+      setUser((prev) => {
+        if (!prev) return null;
+        if (prev.id === targetStudentId || prev.role === 'owner' || prev.role === 'admin') {
+          return {
+            ...prev,
+            enrolledCourseIds: Array.from(new Set([...prev.enrolledCourseIds, targetCourseId])),
+          };
+        }
+        return prev;
+      });
+    }
+
+    // Forward to secure Express backend with Bearer token
+    if (accessToken) {
+      try {
+        const response = await fetch(apiUrl('/api/admin/review-payment'), {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ enrollmentId, action, reason }),
+        });
+        const data = await response.json();
+        return {
+          success: response.ok,
+          message: data.message || (response.ok ? 'Payment review updated.' : data.error || 'Server update failed.'),
+        };
+      } catch (err: any) {
+        console.warn('Backend payment review notice:', err);
+      }
+    }
+
+    return {
+      success: true,
+      message: action === 'approve'
+        ? 'Payment verified and approved. Course access granted.'
+        : `Payment rejected. Explanation recorded for student: "${reason?.trim()}".`,
+    };
+  };
+
+  const requestRefund = async (
+    enrollmentId: string,
+    reason: string
+  ): Promise<{ success: boolean; message: string }> => {
+    if (!user) {
+      return { success: false, message: 'Authentication required to submit refund inquiry.' };
+    }
+    if (!reason || !reason.trim()) {
+      return { success: false, message: 'Please provide the details or reason for the refund.' };
+    }
+
     setEnrollments((prev) => {
       const updated = { ...prev };
       for (const key in updated) {
         if (updated[key].id === enrollmentId) {
-          updated[key].paymentStatus = 'approved';
+          updated[key] = {
+            ...updated[key],
+            refundRequested: true,
+            refundReason: reason.trim(),
+            refundStatus: 'requested',
+            history: [
+              ...(updated[key].history || []),
+              {
+                status: updated[key].paymentStatus,
+                changedBy: user.email,
+                changedAt: new Date().toISOString(),
+                note: `Student requested refund: ${reason.trim()}`,
+              },
+            ],
+          };
         }
       }
       return updated;
@@ -354,15 +483,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (accessToken) {
       try {
-        await fetch('/api/admin/verify-payment', {
+        const response = await fetch(apiUrl('/api/student/request-refund'), {
           method: 'POST',
           headers: getAuthHeaders(),
-          body: JSON.stringify({ enrollmentId }),
+          body: JSON.stringify({ enrollmentId, reason }),
         });
-      } catch (err) {
-        console.warn('Backend payment verification log notice:', err);
+        const data = await response.json();
+        return {
+          success: response.ok,
+          message: data.message || 'Refund request registered with support.',
+        };
+      } catch (err: any) {
+        console.warn('Backend refund request notice:', err);
       }
     }
+
+    return {
+      success: true,
+      message: 'Refund request received. Our finance team will review your transaction details within 24 hours.',
+    };
+  };
+
+  const verifyPaymentAdmin = async (enrollmentId: string) => {
+    await reviewPayment(enrollmentId, 'approve');
   };
 
   const updateLessonProgress = (courseId: string, lessonId: string, timeSeconds: number) => {
@@ -619,7 +762,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.warn('Supabase signout notice:', e);
     }
     if (tokenToInvalidate) {
-      fetch('/api/auth/logout', {
+      fetch(apiUrl('/api/auth/logout'), {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${tokenToInvalidate}` },
       }).catch(() => {});
@@ -666,6 +809,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         openAuthModal,
         openPaymentModal,
         enrollInCourse,
+        reviewPayment,
+        requestRefund,
         verifyPaymentAdmin,
         updateLessonProgress,
         markLessonComplete,

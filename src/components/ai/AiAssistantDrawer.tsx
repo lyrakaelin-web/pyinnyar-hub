@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { t } from '../../utils/translations';
+import { apiUrl } from '../../utils/api';
 import {
   Sparkles,
   X,
@@ -71,7 +72,7 @@ export const AiAssistantDrawer: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/ai/assistant', {
+      const response = await fetch(apiUrl('/api/ai/assistant'), {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({

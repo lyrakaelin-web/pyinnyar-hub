@@ -123,6 +123,15 @@ export interface Course {
   status: 'active' | 'coming_soon';
 }
 
+export type PaymentStatus = 'approved' | 'pending_verification' | 'rejected' | 'free';
+
+export interface PaymentHistoryRecord {
+  status: PaymentStatus;
+  changedBy: string;
+  changedAt: string;
+  note?: string;
+}
+
 export interface Enrollment {
   id: string;
   studentId: string;
@@ -132,10 +141,17 @@ export interface Enrollment {
   lastAccessedLessonId?: string;
   lastAccessedTimeSeconds?: number;
   completedLessonIds: string[];
-  paymentStatus: 'approved' | 'pending_verification' | 'free';
+  paymentStatus: PaymentStatus;
   paymentMethod?: 'kpay' | 'wave' | 'ayapay' | 'bank_transfer' | 'none';
   transactionSlip?: string;
   transactionRef?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  rejectionReason?: string;
+  refundRequested?: boolean;
+  refundReason?: string;
+  refundStatus?: 'none' | 'requested' | 'processed' | 'declined';
+  history?: PaymentHistoryRecord[];
 }
 
 export interface QuizAttempt {

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">PYINNYAR HUB</string>
+    <string name="title_activity_main">PYINNYAR HUB</string>
+    <string name="package_name">mm.pyinnyarhub.app</string>
+    <string name="custom_url_scheme">mm.pyinnyarhub.app</string>
+</resources>

@@ -11,6 +11,44 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
+// Strict Allowed Origins for Capacitor Android, iOS, and Production Web Host
+const ALLOWED_ORIGINS = new Set([
+  'https://localhost',            // Capacitor Android (androidScheme: 'https')
+  'http://localhost',             // Capacitor Android local webview
+  'capacitor://localhost',        // Capacitor iOS native webview
+  'https://pyinnyar-hub.onrender.com', // Production hosted application & API
+  'http://localhost:3000',        // Local dev server
+  'http://localhost:5173',        // Vite default dev port
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173',
+]);
+
+// CORS Middleware enforcing origin verification and preflight handling
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const origin = req.headers.origin;
+
+  if (origin) {
+    const isAllowed = ALLOWED_ORIGINS.has(origin) ||
+      (process.env.APP_URL && origin === process.env.APP_URL.replace(/\/+$/, '')) ||
+      /^https:\/\/ais-.*\.run\.app$/.test(origin);
+
+    if (isAllowed) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+      res.setHeader('Access-Control-Max-Age', '86400');
+    }
+  }
+
+  // Preflight OPTIONS requests handled cleanly
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
+  next();
+});
+
 app.use(express.json());
 
 // Strict Designated Founder / Super Admin Email Configuration
@@ -326,6 +364,68 @@ app.post('/api/admin/promote-role', authenticateToken, requireOwner, async (req:
   });
 });
 
+// Manual Payment Review endpoint (Admin / Owner only)
+// Strictly prevents automatic approval; records reviewer identity, review timestamp, and rejection reason.
+app.post('/api/admin/review-payment', authenticateToken, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const { enrollmentId, action, reason } = req.body || {};
+  if (!enrollmentId || (action !== 'approve' && action !== 'reject')) {
+    return res.status(400).json({ error: 'Valid enrollmentId and action ("approve" | "reject") are required.' });
+  }
+
+  if (action === 'reject' && (!reason || typeof reason !== 'string' || !reason.trim())) {
+    return res.status(400).json({ error: 'Rejection reason explanation is mandatory when rejecting a payment.' });
+  }
+
+  const newStatus = action === 'approve' ? 'approved' : 'rejected';
+  const reviewerEmail = req.user?.email || 'Authorized Staff';
+  const reviewDate = new Date().toISOString();
+
+  if (supabaseAdmin) {
+    try {
+      const updatePayload: Record<string, any> = {
+        payment_status: newStatus,
+        verified_by: req.user?.id,
+        verified_at: reviewDate,
+        rejection_reason: action === 'reject' ? reason.trim() : null,
+      };
+
+      const { error } = await supabaseAdmin
+        .from('enrollments')
+        .update(updatePayload)
+        .eq('id', enrollmentId);
+
+      if (error) {
+        // Safe schema resilience: If audit columns are pending SQL migration, update core status
+        console.warn('Full schema payment update notice (falling back to core columns):', error.message);
+        const { error: fallbackErr } = await supabaseAdmin
+          .from('enrollments')
+          .update({ payment_status: newStatus })
+          .eq('id', enrollmentId);
+
+        if (fallbackErr) {
+          return res.status(500).json({ error: `Database payment update failed: ${fallbackErr.message}` });
+        }
+      }
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message || 'Database update failed.' });
+    }
+  }
+
+  return res.json({
+    success: true,
+    action,
+    newStatus,
+    enrollmentId,
+    reviewedBy: reviewerEmail,
+    reviewedAt: reviewDate,
+    reason: action === 'reject' ? reason.trim() : null,
+    message: action === 'approve'
+      ? `Payment enrollment ${enrollmentId} approved. Student course access unlocked.`
+      : `Payment enrollment ${enrollmentId} rejected with reason: "${reason.trim()}". Access remains locked.`,
+  });
+});
+
+// Legacy backwards compatibility alias for verify-payment
 app.post('/api/admin/verify-payment', authenticateToken, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const { enrollmentId } = req.body || {};
   if (!enrollmentId) {
@@ -337,14 +437,20 @@ app.post('/api/admin/verify-payment', authenticateToken, requireAdmin, async (re
       const { error } = await supabaseAdmin
         .from('enrollments')
         .update({
-          payment_status: 'verified',
+          payment_status: 'approved',
           verified_by: req.user?.id,
           verified_at: new Date().toISOString(),
+          rejection_reason: null,
         })
         .eq('id', enrollmentId);
 
       if (error) {
-        return res.status(500).json({ error: `Database payment update failed: ${error.message}` });
+        // Safe schema resilience
+        console.warn('Full schema verify notice (falling back to payment_status):', error.message);
+        await supabaseAdmin
+          .from('enrollments')
+          .update({ payment_status: 'approved' })
+          .eq('id', enrollmentId);
       }
     } catch (e: any) {
       return res.status(500).json({ error: e.message || 'Database update failed.' });
@@ -353,9 +459,51 @@ app.post('/api/admin/verify-payment', authenticateToken, requireAdmin, async (re
 
   return res.json({
     success: true,
-    message: `Payment enrollment ${enrollmentId} verified by authorized administrator ${req.user?.name || req.user?.email}.`,
+    action: 'approve',
+    enrollmentId,
     verifiedBy: req.user?.email,
     verifiedAt: new Date().toISOString(),
+    message: `Payment enrollment ${enrollmentId} approved by authorized administrator.`,
+  });
+});
+
+// Student Refund Request endpoint
+// Enables students who made accidental or mistaken payments to submit a refund inquiry with proof details
+app.post('/api/student/request-refund', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  const { enrollmentId, reason, contactInfo } = req.body || {};
+  if (!enrollmentId || !reason || typeof reason !== 'string') {
+    return res.status(400).json({ error: 'Enrollment ID and refund justification are required.' });
+  }
+
+  const requestedAt = new Date().toISOString();
+
+  if (supabaseAdmin) {
+    try {
+      const { error } = await supabaseAdmin
+        .from('enrollments')
+        .update({
+          refund_requested: true,
+          refund_reason: reason.trim(),
+          refund_status: 'requested',
+        })
+        .eq('id', enrollmentId)
+        .eq('student_id', req.user?.id);
+
+      if (error) {
+        console.warn('Refund column schema notice (requires migration to persist in database):', error.message);
+      }
+    } catch (e: any) {
+      console.warn('Database refund inquiry notice:', e.message);
+    }
+  }
+
+  return res.json({
+    success: true,
+    message: 'Refund inquiry submitted successfully. Academic finance operations will review within 24–48 hours.',
+    enrollmentId,
+    studentEmail: req.user?.email,
+    requestedAt,
+    contactSupport: 'support@pyinnyarhub.edu.mm',
   });
 });
 

@@ -21,7 +21,7 @@ export const BottomNav: React.FC = () => {
   ];
 
   return (
-    <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#14243A]/95 backdrop-blur-md border-t border-white/10 shadow-lg">
+    <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#14243A]/95 backdrop-blur-md border-t border-white/10 shadow-lg pb-[env(safe-area-inset-bottom,0px)]">
       <div className="grid grid-cols-5 items-center h-16 max-w-md mx-auto px-2">
         {navItems.map((item) => {
           const Icon = item.icon;

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { t } from '../utils/translations';
+import { apiUrl } from '../utils/api';
 import {
   Award,
   CheckCircle2,
@@ -51,7 +52,7 @@ export const CertificateView: React.FC = () => {
     setVerificationResult(null);
 
     try {
-      const response = await fetch(`/api/certificates/verify/${encodeURIComponent(verifySearchCode.trim())}`);
+      const response = await fetch(apiUrl(`/api/certificates/verify/${encodeURIComponent(verifySearchCode.trim())}`));
       const data = await response.json();
       if (response.ok && data.found) {
         setVerificationResult({ found: true, cert: data.certificate });
