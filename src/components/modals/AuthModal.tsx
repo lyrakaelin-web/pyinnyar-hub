@@ -37,6 +37,7 @@ export const AuthModal: React.FC = () => {
     setSuccessMsg('');
   };
 
+  // Keep the modal mode synchronized with AppContext.
   useEffect(() => {
     if (isAuthModalOpen) {
       setMode(authMode);
@@ -44,7 +45,7 @@ export const AuthModal: React.FC = () => {
     }
   }, [authMode, isAuthModalOpen]);
 
-  // Detect Supabase password recovery links.
+  // Detect when the user opens a Supabase password recovery link.
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
 
@@ -52,15 +53,21 @@ export const AuthModal: React.FC = () => {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY') {
-        setMode('reset_password');
         setPassword('');
         setConfirmPassword('');
-        clearMessages();
-        openAuthModal(true, 'login');
+        setErrorMsg('');
+        setSuccessMsg('');
+
+        // Important: set BOTH the local mode and AppContext mode
+        // to reset_password, not login.
+        setMode('reset_password');
+        openAuthModal(true, 'reset_password');
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+    };
   }, [openAuthModal]);
 
   if (!isAuthModalOpen) return null;
@@ -79,10 +86,15 @@ export const AuthModal: React.FC = () => {
     const normalizedEmail = email.trim().toLowerCase();
 
     if (mode !== 'reset_password' && !normalizedEmail) {
-      setErrorMsg(isMy ? 'အီးမေးလ်ထည့်ပေးပါ။' : 'Please enter your email address.');
+      setErrorMsg(
+        isMy
+          ? 'အီးမေးလ်ထည့်ပေးပါ။'
+          : 'Please enter your email address.'
+      );
       return;
     }
 
+    // FORGOT PASSWORD
     if (mode === 'forgot_password') {
       if (!isSupabaseConfigured()) {
         setErrorMsg('Password reset requires Supabase configuration.');
@@ -115,6 +127,7 @@ export const AuthModal: React.FC = () => {
       return;
     }
 
+    // RESET PASSWORD
     if (mode === 'reset_password') {
       if (!isSupabaseConfigured()) {
         setErrorMsg('Supabase is not configured.');
@@ -122,19 +135,29 @@ export const AuthModal: React.FC = () => {
       }
 
       if (password.length < 6) {
-        setErrorMsg(isMy ? 'စကားဝှက် အနည်းဆုံး ၆ လုံးရှိရပါမယ်။' : 'Password must contain at least 6 characters.');
+        setErrorMsg(
+          isMy
+            ? 'စကားဝှက် အနည်းဆုံး ၆ လုံးရှိရပါမယ်။'
+            : 'Password must contain at least 6 characters.'
+        );
         return;
       }
 
       if (password !== confirmPassword) {
-        setErrorMsg(isMy ? 'စကားဝှက်နှစ်ခု မတူညီပါ။' : 'Passwords do not match.');
+        setErrorMsg(
+          isMy
+            ? 'စကားဝှက်နှစ်ခု မတူညီပါ။'
+            : 'Passwords do not match.'
+        );
         return;
       }
 
       setLoading(true);
 
       try {
-        const { error } = await supabase.auth.updateUser({ password });
+        const { error } = await supabase.auth.updateUser({
+          password,
+        });
 
         if (error) throw error;
 
@@ -151,7 +174,10 @@ export const AuthModal: React.FC = () => {
           switchMode('login');
         }, 1800);
       } catch (error: any) {
-        setErrorMsg(error.message || 'Unable to update password. Please request a new reset link.');
+        setErrorMsg(
+          error.message ||
+          'Unable to update password. Please request a new reset link.'
+        );
       } finally {
         setLoading(false);
       }
@@ -159,13 +185,22 @@ export const AuthModal: React.FC = () => {
       return;
     }
 
+    // LOGIN / REGISTER VALIDATION
     if (!password || password.length < 6) {
-      setErrorMsg(isMy ? 'စကားဝှက် အနည်းဆုံး ၆ လုံးရှိရပါမယ်။' : 'Password must be at least 6 characters.');
+      setErrorMsg(
+        isMy
+          ? 'စကားဝှက် အနည်းဆုံး ၆ လုံးရှိရပါမယ်။'
+          : 'Password must be at least 6 characters.'
+      );
       return;
     }
 
     if (mode === 'register' && password !== confirmPassword) {
-      setErrorMsg(isMy ? 'စကားဝှက်နှစ်ခု မတူညီပါ။' : 'Passwords do not match.');
+      setErrorMsg(
+        isMy
+          ? 'စကားဝှက်နှစ်ခု မတူညီပါ။'
+          : 'Passwords do not match.'
+      );
       return;
     }
 
@@ -173,6 +208,7 @@ export const AuthModal: React.FC = () => {
 
     try {
       if (isSupabaseConfigured()) {
+        // SUPABASE LOGIN
         if (mode === 'login') {
           const { data, error } = await supabase.auth.signInWithPassword({
             email: normalizedEmail,
@@ -186,11 +222,13 @@ export const AuthModal: React.FC = () => {
           }
 
           const isOwner = normalizedEmail === 'lyrakaelin@gmail.com';
+
           let role: 'owner' | 'admin' | 'instructor' | 'student' =
             isOwner ? 'owner' : 'student';
 
           let displayName =
-            data.user.user_metadata?.name || normalizedEmail.split('@')[0];
+            data.user.user_metadata?.name ||
+            normalizedEmail.split('@')[0];
 
           const { data: profile } = await supabase
             .from('profiles')
@@ -206,64 +244,87 @@ export const AuthModal: React.FC = () => {
                 : profile.role;
           }
 
-          if (profile?.name) displayName = profile.name;
+          if (profile?.name) {
+            displayName = profile.name;
+          }
 
-          login({
-            id: data.user.id,
-            name: displayName,
-            email: data.user.email || normalizedEmail,
-            role,
-            avatar: '',
-            learningPreferences: {
-              language,
-              weeklyGoalHours: 6,
-              preferredCategories: [1, 2, 4],
-              notificationsEnabled: true,
+          login(
+            {
+              id: data.user.id,
+              name: displayName,
+              email: data.user.email || normalizedEmail,
+              role,
+              avatar: '',
+              learningPreferences: {
+                language,
+                weeklyGoalHours: 6,
+                preferredCategories: [1, 2, 4],
+                notificationsEnabled: true,
+              },
+              enrolledCourseIds: [],
+              completedCourseIds: [],
+              savedCourseIds: [],
+              createdAt:
+                data.user.created_at || new Date().toISOString(),
             },
-            enrolledCourseIds: [],
-            completedCourseIds: [],
-            savedCourseIds: [],
-            createdAt: data.user.created_at || new Date().toISOString(),
-          }, data.session.access_token);
+            data.session.access_token
+          );
 
-          setSuccessMsg(isMy ? 'အကောင့်ဝင်ရောက်ပြီးပါပြီ။' : 'Signed in successfully.');
+          setSuccessMsg(
+            isMy
+              ? 'အကောင့်ဝင်ရောက်ပြီးပါပြီ။'
+              : 'Signed in successfully.'
+          );
+
           setPassword('');
 
           setTimeout(() => openAuthModal(false), 900);
           return;
         }
 
+        // SUPABASE REGISTRATION
         // Public signups do not accept a role from the browser.
         const { data, error } = await supabase.auth.signUp({
           email: normalizedEmail,
           password,
           options: {
-            data: { name: name.trim() || 'Learner' },
+            data: {
+              name: name.trim() || 'Learner',
+            },
           },
         });
 
         if (error) throw error;
 
         if (data.session && data.user) {
-          login({
-            id: data.user.id,
-            name: name.trim() || 'Learner',
-            email: data.user.email || normalizedEmail,
-            role: 'student',
-            avatar: '',
-            learningPreferences: {
-              language,
-              weeklyGoalHours: 6,
-              preferredCategories: [1, 2, 4],
-              notificationsEnabled: true,
+          login(
+            {
+              id: data.user.id,
+              name: name.trim() || 'Learner',
+              email: data.user.email || normalizedEmail,
+              role: 'student',
+              avatar: '',
+              learningPreferences: {
+                language,
+                weeklyGoalHours: 6,
+                preferredCategories: [1, 2, 4],
+                notificationsEnabled: true,
+              },
+              enrolledCourseIds: [],
+              completedCourseIds: [],
+              savedCourseIds: [],
+              createdAt:
+                data.user.created_at || new Date().toISOString(),
             },
-            enrolledCourseIds: [],
-            completedCourseIds: [],
-            savedCourseIds: [],
-            createdAt: data.user.created_at || new Date().toISOString(),
-          }, data.session.access_token);
+            data.session.access_token
+          );
 
-          setSuccessMsg(isMy ? 'အကောင့်ဖွင့်ပြီးပါပြီ။' : 'Account created successfully!');
+          setSuccessMsg(
+            isMy
+              ? 'အကောင့်ဖွင့်ပြီးပါပြီ။'
+              : 'Account created successfully!'
+          );
+
           setTimeout(() => openAuthModal(false), 900);
         } else {
           setSuccessMsg(
@@ -271,6 +332,7 @@ export const AuthModal: React.FC = () => {
               ? 'အကောင့်ဖွင့်ပြီးပါပြီ။ Email ထဲက verification link ကိုနှိပ်ပေးပါ။'
               : 'Registration successful. Please verify your email before signing in.'
           );
+
           setPassword('');
           setConfirmPassword('');
         }
@@ -278,18 +340,29 @@ export const AuthModal: React.FC = () => {
         return;
       }
 
-      // Existing backend fallback for login and registration.
+      // BACKEND FALLBACK
       const endpoint = apiUrl(
-        mode === 'login' ? '/api/auth/login' : '/api/auth/register'
+        mode === 'login'
+          ? '/api/auth/login'
+          : '/api/auth/register'
       );
 
       const body = mode === 'login'
-        ? { email: normalizedEmail, password }
-        : { name: name.trim() || 'Learner', email: normalizedEmail, password };
+        ? {
+            email: normalizedEmail,
+            password,
+          }
+        : {
+            name: name.trim() || 'Learner',
+            email: normalizedEmail,
+            password,
+          };
 
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify(body),
       });
 
@@ -303,13 +376,23 @@ export const AuthModal: React.FC = () => {
 
       setSuccessMsg(
         mode === 'login'
-          ? (isMy ? 'အကောင့်ဝင်ရောက်ပြီးပါပြီ။' : 'Signed in successfully.')
-          : (isMy ? 'အကောင့်ဖွင့်ပြီးပါပြီ။' : 'Account created successfully!')
+          ? (
+              isMy
+                ? 'အကောင့်ဝင်ရောက်ပြီးပါပြီ။'
+                : 'Signed in successfully.'
+            )
+          : (
+              isMy
+                ? 'အကောင့်ဖွင့်ပြီးပါပြီ။'
+                : 'Account created successfully!'
+            )
       );
 
       setTimeout(() => openAuthModal(false), 900);
     } catch (error: any) {
-      setErrorMsg(error.message || 'Network error. Please try again.');
+      setErrorMsg(
+        error.message || 'Network error. Please try again.'
+      );
     } finally {
       setLoading(false);
     }
@@ -340,7 +423,9 @@ export const AuthModal: React.FC = () => {
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#101B2B]/70 backdrop-blur-sm"
       onClick={(e) => {
-        if (e.target === e.currentTarget) openAuthModal(false);
+        if (e.target === e.currentTarget) {
+          openAuthModal(false);
+        }
       }}
     >
       <div className="relative bg-white rounded-3xl max-w-md w-full p-7 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
@@ -358,15 +443,35 @@ export const AuthModal: React.FC = () => {
           <div className="text-[11px] tracking-[0.25em] font-bold text-[#A9874B] mb-2">
             PYINNYAR HUB
           </div>
-          <h2 className="text-2xl font-bold text-[#14243A]">{title}</h2>
+
+          <h2 className="text-2xl font-bold text-[#14243A]">
+            {title}
+          </h2>
+
           <p className="text-xs text-stone-500 mt-2">
             {mode === 'login'
-              ? (isMy ? 'သင့်ရဲ့သင်ယူမှုခရီးစဉ်ကို ဆက်လက်လေ့လာပါ။' : 'Continue your learning journey with us.')
+              ? (
+                  isMy
+                    ? 'သင့်ရဲ့သင်ယူမှုခရီးစဉ်ကို ဆက်လက်လေ့လာပါ။'
+                    : 'Continue your learning journey with us.'
+                )
               : mode === 'register'
-                ? (isMy ? 'သင်ယူမှုအသိုင်းအဝိုင်းထဲ ပါဝင်လိုက်ပါ။' : 'Join the PYINNYAR HUB learning community.')
+                ? (
+                    isMy
+                      ? 'သင်ယူမှုအသိုင်းအဝိုင်းထဲ ပါဝင်လိုက်ပါ။'
+                      : 'Join the PYINNYAR HUB learning community.'
+                  )
                 : mode === 'forgot_password'
-                  ? (isMy ? 'အကောင့်ဖွင့်ထားတဲ့ email ကို ထည့်ပေးပါ။' : 'Enter your account email to receive a reset link.')
-                  : (isMy ? 'အကောင့်အတွက် စကားဝှက်အသစ် ထည့်ပေးပါ။' : 'Choose a new password for your account.')}
+                  ? (
+                      isMy
+                        ? 'အကောင့်ဖွင့်ထားတဲ့ email ကို ထည့်ပေးပါ။'
+                        : 'Enter your account email to receive a reset link.'
+                    )
+                  : (
+                      isMy
+                        ? 'အကောင့်အတွက် စကားဝှက်အသစ် ထည့်ပေးပါ။'
+                        : 'Choose a new password for your account.'
+                    )}
           </p>
         </div>
 
@@ -391,8 +496,10 @@ export const AuthModal: React.FC = () => {
               <label className="block text-xs font-semibold text-stone-600 mb-2">
                 {isMy ? 'နာမည်အပြည့်အစုံ' : 'Full Name'}
               </label>
+
               <div className="relative">
                 <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+
                 <input
                   type="text"
                   value={name}
@@ -410,8 +517,10 @@ export const AuthModal: React.FC = () => {
               <label className="block text-xs font-semibold text-stone-600 mb-2">
                 {isMy ? 'အီးမေးလ်လိပ်စာ' : 'Email Address'}
               </label>
+
               <div className="relative">
                 <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+
                 <input
                   type="email"
                   value={email}
@@ -447,6 +556,7 @@ export const AuthModal: React.FC = () => {
 
               <div className="relative">
                 <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
@@ -454,16 +564,23 @@ export const AuthModal: React.FC = () => {
                   placeholder="Minimum 6 characters"
                   className={`${inputClass} pr-11`}
                   minLength={6}
-                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                  autoComplete={
+                    mode === 'login'
+                      ? 'current-password'
+                      : 'new-password'
+                  }
                   required
                 />
+
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3.5 top-1/2 -translate-y-1/2 text-stone-400"
                   aria-label="Toggle password visibility"
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showPassword
+                    ? <EyeOff className="w-4 h-4" />
+                    : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>
@@ -474,25 +591,34 @@ export const AuthModal: React.FC = () => {
               <label className="block text-xs font-semibold text-stone-600 mb-2">
                 {isMy ? 'စကားဝှက် ထပ်မံထည့်ပါ' : 'Confirm Password'}
               </label>
+
               <div className="relative">
                 <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+
                 <input
                   type={showConfirm ? 'text' : 'password'}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder={isMy ? 'စကားဝှက် ထပ်ထည့်ပါ' : 'Enter password again'}
+                  placeholder={
+                    isMy
+                      ? 'စကားဝှက် ထပ်ထည့်ပါ'
+                      : 'Enter password again'
+                  }
                   className={`${inputClass} pr-11`}
                   minLength={6}
                   autoComplete="new-password"
                   required
                 />
+
                 <button
                   type="button"
                   onClick={() => setShowConfirm(!showConfirm)}
                   className="absolute right-3.5 top-1/2 -translate-y-1/2 text-stone-400"
                   aria-label="Toggle confirmation visibility"
                 >
-                  {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showConfirm
+                    ? <EyeOff className="w-4 h-4" />
+                    : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>
@@ -511,7 +637,10 @@ export const AuthModal: React.FC = () => {
         <div className="mt-6 pt-5 border-t border-stone-100 text-center text-xs text-stone-500">
           {mode === 'login' ? (
             <>
-              {isMy ? 'အကောင့်မရှိသေးဘူးလား?' : "Don't have an account?"}{' '}
+              {isMy
+                ? 'အကောင့်မရှိသေးဘူးလား?'
+                : "Don't have an account?"}{' '}
+
               <button
                 type="button"
                 onClick={() => switchMode('register')}
@@ -526,11 +655,16 @@ export const AuthModal: React.FC = () => {
               onClick={() => switchMode('login')}
               className="font-bold text-[#14243A] hover:underline"
             >
-              {isMy ? 'အကောင့်ဝင်ရန် ပြန်သွားပါ' : 'Back to Sign In'}
+              {isMy
+                ? 'အကောင့်ဝင်ရန် ပြန်သွားပါ'
+                : 'Back to Sign In'}
             </button>
           ) : (
             <>
-              {isMy ? 'အကောင့်ရှိပြီးသားလား?' : 'Already have an account?'}{' '}
+              {isMy
+                ? 'အကောင့်ရှိပြီးသားလား?'
+                : 'Already have an account?'}{' '}
+
               <button
                 type="button"
                 onClick={() => switchMode('login')}
