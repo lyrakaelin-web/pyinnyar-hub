@@ -26,8 +26,22 @@ jobs:
       - name: Build React app
         run: npm run build
 
+      - name: Generate iOS Project
+        run: |
+          if [ ! -d "ios/App" ]; then
+            npx cap add ios
+          fi
+
       - name: Sync Capacitor iOS
         run: npx cap sync ios
+
+      - name: Check iOS Workspace
+        run: |
+          if [ ! -d "ios/App/App.xcworkspace" ]; then
+            echo "ERROR: App.xcworkspace was not generated."
+            find ios -maxdepth 4 -type d
+            exit 1
+          fi
 
       - name: Build iOS archive
         run: |
