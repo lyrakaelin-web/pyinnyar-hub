@@ -1,26 +1,39 @@
+
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const rawUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
+const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+
+const cleanUrl = rawUrl
+  .replace(/\/+$/, '')
+  .replace(/\/rest\/v1$/i, '');
 
 export const isSupabaseConfigured = (): boolean => {
   return Boolean(
-    supabaseUrl &&
+    cleanUrl &&
     supabaseAnonKey &&
-    !supabaseUrl.includes('placeholder') &&
-    !supabaseAnonKey.includes('placeholder')
+    !cleanUrl.includes('placeholder') &&
+    !supabaseAnonKey.includes('placeholder') &&
+    /^https:\/\/[a-zA-Z0-9-]+\.supabase\.co$/i.test(cleanUrl)
   );
 };
 
-// Fallback dummy URL to prevent runtime crash if environment variables are not yet configured
-const rawUrl = isSupabaseConfigured() ? supabaseUrl : 'https://placeholder.supabase.co';
-const safeUrl = rawUrl.replace(/\/+$/, '');
-const safeKey = isSupabaseConfigured() ? supabaseAnonKey : 'placeholder-anon-key';
+const safeUrl = isSupabaseConfigured()
+  ? cleanUrl
+  : 'https://placeholder.supabase.co';
 
-export const supabase: SupabaseClient = createClient(safeUrl, safeKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-  },
-});
+const safeKey = isSupabaseConfigured()
+  ? supabaseAnonKey
+  : 'placeholder-anon-key';
+
+export const supabase: SupabaseClient = createClient(
+  safeUrl,
+  safeKey,
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  }
+);
