@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { apiUrl } from '../utils/api';
@@ -63,7 +64,6 @@ interface AppContextType {
   isPaymentModalOpen: boolean;
   pendingPaymentCourseId: string | null;
 
-  // Actions
   setLanguage: (lang: Language) => void;
   setCurrentView: (view: ViewType) => void;
   selectCourse: (courseId: string) => void;
@@ -75,7 +75,6 @@ interface AppContextType {
   openAuthModal: (open?: boolean, mode?: 'login' | 'register' | 'forgot_password') => void;
   openPaymentModal: (courseId?: string | null) => void;
 
-  // Business logic
   enrollInCourse: (courseId: string, paymentMethod?: any, slipRef?: string) => void;
   reviewPayment: (enrollmentId: string, action: 'approve' | 'reject', reason?: string) => Promise<{ success: boolean; message: string }>;
   requestRefund: (enrollmentId: string, reason: string) => Promise<{ success: boolean; message: string }>;
@@ -99,20 +98,25 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Load or initialize state from LocalStorage - never auto-authenticate demo users
-  const [user, setUser] = useState<User | null>(() => {
-    try {
-      const saved = localStorage.getItem('ph_user');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
+// Safely load data from LocalStorage
+const safeLoad = <T,>(key: string, fallback: T): T => {
+  try {
+    const saved = localStorage.getItem(key);
+    return saved ? (JSON.parse(saved) as T) : fallback;
+  } catch (error) {
+    console.error(`Failed to load ${key}:`, error);
+    return fallback;
+  }
+};
 
-  const [accessToken, setAccessToken] = useState<string | null>(() => {
-    return localStorage.getItem('ph_access_token') || null;
-  });
+export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<User | null>(() =>
+    safeLoad<User | null>('ph_user', null)
+  );
+
+  const [accessToken, setAccessToken] = useState<string | null>(() =>
+    safeLoad<string | null>('ph_access_token', null)
+  );
 
   const getAuthHeaders = (): Record<string, string> => {
     const headers: Record<string, string> = {
@@ -128,34 +132,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setAccessToken(session.access_token);
-        localStorage.setItem('ph_access_token', session.access_token);
-      }
-    });
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        if (session?.user) {
+          setAccessToken(session.access_token);
+          localStorage.setItem('ph_access_token', session.access_token);
+        }
+      })
+      .catch((error) => {
+        console.error('Supabase session notice:', error);
+      });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        setAccessToken(session.access_token);
-        localStorage.setItem('ph_access_token', session.access_token);
-      } else if (event === 'SIGNED_OUT') {
-        setUser(null);
-        setAccessToken(null);
-        localStorage.removeItem('ph_user');
-        localStorage.removeItem('ph_access_token');
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (session?.user) {
+          setAccessToken(session.access_token);
+          localStorage.setItem('ph_access_token', session.access_token);
+        } else if (event === 'SIGNED_OUT') {
+          setUser(null);
+          setAccessToken(null);
+          localStorage.removeItem('ph_user');
+          localStorage.removeItem('ph_access_token');
+        }
       }
-    });
+    );
 
     return () => {
       subscription.unsubscribe();
     };
   }, []);
 
-  const [language, setLanguageState] = useState<Language>(() => {
-    const saved = localStorage.getItem('ph_lang');
-    return (saved as Language) || 'en';
-  });
+  const [language, setLanguageState] = useState<Language>(() =>
+    safeLoad<Language>('ph_lang', 'en')
+  );
 
   const [currentView, setCurrentView] = useState<ViewType>('home');
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
@@ -164,56 +173,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [selectedCertificateId, setSelectedCertificateId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  const [courses, setCourses] = useState<Course[]>(() => {
-    const saved = localStorage.getItem('ph_courses');
-    return saved ? JSON.parse(saved) : COURSES;
-  });
+  const [courses, setCourses] = useState<Course[]>(() =>
+    safeLoad<Course[]>('ph_courses', COURSES)
+  );
 
-  const [categories, setCategories] = useState<Category[]>(() => {
-    const saved = localStorage.getItem('ph_categories');
-    return saved ? JSON.parse(saved) : CATEGORIES;
-  });
+  const [categories, setCategories] = useState<Category[]>(() =>
+    safeLoad<Category[]>('ph_categories', CATEGORIES)
+  );
 
-  const [enrollments, setEnrollments] = useState<Record<string, Enrollment>>(() => {
-    const saved = localStorage.getItem('ph_enrollments');
-    return saved ? JSON.parse(saved) : {};
-  });
+  const [enrollments, setEnrollments] = useState<Record<string, Enrollment>>(() =>
+    safeLoad<Record<string, Enrollment>>('ph_enrollments', {})
+  );
 
-  const [quizAttempts, setQuizAttempts] = useState<QuizAttempt[]>(() => {
-    const saved = localStorage.getItem('ph_quiz_attempts');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [quizAttempts, setQuizAttempts] = useState<QuizAttempt[]>(() =>
+    safeLoad<QuizAttempt[]>('ph_quiz_attempts', [])
+  );
 
-  const [certificates, setCertificates] = useState<Certificate[]>(() => {
-    const saved = localStorage.getItem('ph_certificates');
-    if (saved) return JSON.parse(saved);
-    return [
-      {
-        id: 'cert_seed_01',
-        certificateCode: 'PH-2026-CERT-8842',
-        studentId: INITIAL_USER.id,
-        studentName: INITIAL_USER.name,
-        courseId: 'course_lang_01',
-        courseTitle: 'Professional English Communication & Academic Writing',
-        courseTitleMy: 'လုပ်ငန်းခွင်နှင့် ပညာသင်ဆုများအတွက် အင်္ဂလိပ်စာ အဆင့်မြင့် ရေးသားပြောဆိုခြင်း',
-        instructorName: 'Sarah Mitchell, MA',
-        completionDate: 'February 14, 2026',
-        verificationHash: '8f7a93c4e12d',
-        gradeAchieved: 'High Distinction (96%)',
-        approvedByAdmin: true,
-      },
-    ];
-  });
+  const defaultCertificates: Certificate[] = [
+    {
+      id: 'cert_seed_01',
+      certificateCode: 'PH-2026-CERT-8842',
+      studentId: INITIAL_USER.id,
+      studentName: INITIAL_USER.name,
+      courseId: 'course_lang_01',
+      courseTitle: 'Professional English Communication & Academic Writing',
+      courseTitleMy: 'လုပ်ငန်းခွင်နှင့် ပညာသင်ဆုများအတွက် အင်္ဂလိပ်စာ အဆင့်မြင့် ရေးသားပြောဆိုခြင်း',
+      instructorName: 'Sarah Mitchell, MA',
+      completionDate: 'February 14, 2026',
+      verificationHash: '8f7a93c4e12d',
+      gradeAchieved: 'High Distinction (96%)',
+      approvedByAdmin: true,
+    },
+  ];
 
-  const [opportunities, setOpportunities] = useState<Opportunity[]>(() => {
-    const saved = localStorage.getItem('ph_opportunities');
-    return saved ? JSON.parse(saved) : OPPORTUNITIES;
-  });
+  const [certificates, setCertificates] = useState<Certificate[]>(() =>
+    safeLoad<Certificate[]>('ph_certificates', defaultCertificates)
+  );
 
-  const [communityPosts, setCommunityPosts] = useState<CommunityPost[]>(() => {
-    const saved = localStorage.getItem('ph_community_posts');
-    return saved ? JSON.parse(saved) : COMMUNITY_POSTS;
-  });
+  const [opportunities, setOpportunities] = useState<Opportunity[]>(() =>
+    safeLoad<Opportunity[]>('ph_opportunities', OPPORTUNITIES)
+  );
+
+  const [communityPosts, setCommunityPosts] = useState<CommunityPost[]>(() =>
+    safeLoad<CommunityPost[]>('ph_community_posts', COMMUNITY_POSTS)
+  );
 
   const [announcements] = useState<Announcement[]>(ANNOUNCEMENTS);
 
@@ -317,6 +320,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       openAuthModal(true, 'login');
       return;
     }
+
     const course = courses.find((c) => c.id === courseId);
     const isFree = !course || course.priceMMK === 0;
     const now = new Date().toISOString();
@@ -328,7 +332,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       enrolledAt: now,
       progressPercent: 0,
       completedLessonIds: [],
-      // NEVER automatically approve paid courses. Set to 'pending_verification' until manual Admin/Owner review.
       paymentStatus: isFree ? 'free' : 'pending_verification',
       paymentMethod,
       transactionRef: slipRef || `REF-${Math.floor(100000 + Math.random() * 900000)}`,
@@ -337,14 +340,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           status: isFree ? 'free' : 'pending_verification',
           changedBy: user.email,
           changedAt: now,
-          note: isFree ? 'Free course enrollment' : 'Student submitted payment receipt. Awaiting manual Admin/Owner review.',
+          note: isFree
+            ? 'Free course enrollment'
+            : 'Student submitted payment receipt. Awaiting manual Admin/Owner review.',
         },
       ],
     };
 
     setEnrollments((prev) => ({ ...prev, [courseId]: newEnrollment }));
 
-    // Only grant active course access immediately for free courses!
     if (isFree) {
       setUser((prev) => (prev ? {
         ...prev,
@@ -364,11 +368,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     reason?: string
   ): Promise<{ success: boolean; message: string }> => {
     if (!user || (user.role !== 'admin' && user.role !== 'owner')) {
-      return { success: false, message: 'Unauthorized: Only an authorized Admin or Owner can review payments.' };
+      return {
+        success: false,
+        message: 'Unauthorized: Only an authorized Admin or Owner can review payments.',
+      };
     }
 
     if (action === 'reject' && (!reason || !reason.trim())) {
-      return { success: false, message: 'Rejection requires a clear explanation for the student.' };
+      return {
+        success: false,
+        message: 'Rejection requires a clear explanation for the student.',
+      };
     }
 
     const now = new Date().toISOString();
@@ -377,6 +387,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setEnrollments((prev) => {
       const updated = { ...prev };
+
       for (const courseKey in updated) {
         if (updated[courseKey].id === enrollmentId) {
           targetCourseId = updated[courseKey].courseId;
@@ -388,7 +399,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             paymentStatus: action === 'approve' ? 'approved' : 'rejected',
             reviewedBy: user.email,
             reviewedAt: now,
-            rejectionReason: action === 'reject' ? (reason?.trim() || 'Payment verification declined.') : undefined,
+            rejectionReason: action === 'reject'
+              ? (reason?.trim() || 'Payment verification declined.')
+              : undefined,
             history: [
               ...currentHistory,
               {
@@ -403,24 +416,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           };
         }
       }
+
       return updated;
     });
 
-    // If reviewing current user's enrollment (e.g. testing in session)
     if (action === 'approve' && targetCourseId) {
       setUser((prev) => {
         if (!prev) return null;
-        if (prev.id === targetStudentId || prev.role === 'owner' || prev.role === 'admin') {
+
+        if (
+          prev.id === targetStudentId ||
+          prev.role === 'owner' ||
+          prev.role === 'admin'
+        ) {
           return {
             ...prev,
-            enrolledCourseIds: Array.from(new Set([...prev.enrolledCourseIds, targetCourseId])),
+            enrolledCourseIds: Array.from(
+              new Set([...prev.enrolledCourseIds, targetCourseId])
+            ),
           };
         }
+
         return prev;
       });
     }
 
-    // Forward to secure Express backend with Bearer token
     if (accessToken) {
       try {
         const response = await fetch(apiUrl('/api/admin/review-payment'), {
@@ -428,10 +448,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           headers: getAuthHeaders(),
           body: JSON.stringify({ enrollmentId, action, reason }),
         });
+
         const data = await response.json();
+
         return {
           success: response.ok,
-          message: data.message || (response.ok ? 'Payment review updated.' : data.error || 'Server update failed.'),
+          message: data.message || (
+            response.ok
+              ? 'Payment review updated.'
+              : data.error || 'Server update failed.'
+          ),
         };
       } catch (err: any) {
         console.warn('Backend payment review notice:', err);
@@ -451,14 +477,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     reason: string
   ): Promise<{ success: boolean; message: string }> => {
     if (!user) {
-      return { success: false, message: 'Authentication required to submit refund inquiry.' };
+      return {
+        success: false,
+        message: 'Authentication required to submit refund inquiry.',
+      };
     }
+
     if (!reason || !reason.trim()) {
-      return { success: false, message: 'Please provide the details or reason for the refund.' };
+      return {
+        success: false,
+        message: 'Please provide the details or reason for the refund.',
+      };
     }
 
     setEnrollments((prev) => {
       const updated = { ...prev };
+
       for (const key in updated) {
         if (updated[key].id === enrollmentId) {
           updated[key] = {
@@ -478,6 +512,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           };
         }
       }
+
       return updated;
     });
 
@@ -488,7 +523,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           headers: getAuthHeaders(),
           body: JSON.stringify({ enrollmentId, reason }),
         });
+
         const data = await response.json();
+
         return {
           success: response.ok,
           message: data.message || 'Refund request registered with support.',
@@ -508,10 +545,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await reviewPayment(enrollmentId, 'approve');
   };
 
-  const updateLessonProgress = (courseId: string, lessonId: string, timeSeconds: number) => {
+  const updateLessonProgress = (
+    courseId: string,
+    lessonId: string,
+    timeSeconds: number
+  ) => {
     setEnrollments((prev) => {
       const existing = prev[courseId];
       if (!existing) return prev;
+
       return {
         ...prev,
         [courseId]: {
@@ -525,19 +567,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const markLessonComplete = (courseId: string, lessonId: string) => {
     const course = courses.find((c) => c.id === courseId);
+
     setEnrollments((prev) => {
       const existing = prev[courseId];
       if (!existing) return prev;
 
-      const completed = Array.from(new Set([...existing.completedLessonIds, lessonId]));
-      // Calculate total lessons in course
+      const completed = Array.from(
+        new Set([...existing.completedLessonIds, lessonId])
+      );
+
       let totalLessons = 0;
       course?.modules.forEach((m) => {
         totalLessons += m.lessons.length;
       });
+
       if (totalLessons === 0) totalLessons = 1;
 
-      const progress = Math.min(100, Math.round((completed.length / totalLessons) * 100));
+      const progress = Math.min(
+        100,
+        Math.round((completed.length / totalLessons) * 100)
+      );
 
       return {
         ...prev,
@@ -550,12 +599,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  const recordQuizAttempt = (attempt: Omit<QuizAttempt, 'id' | 'attemptedAt'>) => {
+  const recordQuizAttempt = (
+    attempt: Omit<QuizAttempt, 'id' | 'attemptedAt'>
+  ) => {
     const newAttempt: QuizAttempt = {
       ...attempt,
       id: `qa_${Date.now()}`,
       attemptedAt: new Date().toISOString(),
     };
+
     setQuizAttempts((prev) => [newAttempt, ...prev]);
   };
 
@@ -564,11 +616,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       openAuthModal(true, 'login');
       throw new Error('Please sign in to claim your certificate.');
     }
+
     const course = courses.find((c) => c.id === courseId);
-    const existing = certificates.find((c) => c.courseId === courseId && c.studentId === user.id);
+    const existing = certificates.find(
+      (c) => c.courseId === courseId && c.studentId === user.id
+    );
+
     if (existing) return existing;
 
     const certCode = `PH-2026-CERT-${Math.floor(1000 + Math.random() * 9000)}`;
+
     const newCert: Certificate = {
       id: `cert_${Date.now()}`,
       certificateCode: certCode,
@@ -578,16 +635,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       courseTitle: course?.title || 'Professional Course Program',
       courseTitleMy: course?.titleMy || 'ပရော်ဖက်ရှင်နယ် သင်တန်းဆင်းလက်မှတ်',
       instructorName: course?.instructor.name || 'PYINNYAR HUB Academic Faculty',
-      completionDate: new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
+      completionDate: new Date().toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+      }),
       verificationHash: Math.random().toString(36).substring(2, 12),
       gradeAchieved: 'Distinction (92%)',
       approvedByAdmin: true,
     };
 
     setCertificates((prev) => [newCert, ...prev]);
+
     setUser((prev) => (prev ? {
       ...prev,
-      completedCourseIds: Array.from(new Set([...prev.completedCourseIds, courseId])),
+      completedCourseIds: Array.from(
+        new Set([...prev.completedCourseIds, courseId])
+      ),
     } : null));
 
     return newCert;
@@ -598,21 +662,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       openAuthModal(true, 'login');
       return;
     }
+
     setUser((prev) => {
       if (!prev) return null;
+
       const isSaved = prev.savedCourseIds.includes(courseId);
       const nextSaved = isSaved
         ? prev.savedCourseIds.filter((id) => id !== courseId)
         : [...prev.savedCourseIds, courseId];
+
       return { ...prev, savedCourseIds: nextSaved };
     });
   };
 
-  const addCommunityPost = (title: string, content: string, category: string) => {
+  const addCommunityPost = (
+    title: string,
+    content: string,
+    category: string
+  ) => {
     if (!user) {
       openAuthModal(true, 'login');
       return;
     }
+
     const newPost: CommunityPost = {
       id: `post_${Date.now()}`,
       title,
@@ -625,6 +697,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       likes: 0,
       replies: [],
     };
+
     setCommunityPosts((prev) => [newPost, ...prev]);
   };
 
@@ -633,6 +706,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       openAuthModal(true, 'login');
       return;
     }
+
     setCommunityPosts((prev) =>
       prev.map((post) => {
         if (post.id === postId) {
@@ -650,6 +724,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             ],
           };
         }
+
         return post;
       })
     );
@@ -657,14 +732,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const flagPost = (postId: string) => {
     setCommunityPosts((prev) =>
-      prev.map((post) => (post.id === postId ? { ...post, isFlagged: true } : post))
+      prev.map((post) =>
+        post.id === postId
+          ? { ...post, isFlagged: true }
+          : post
+      )
     );
   };
 
   const addOrUpdateCourse = (courseData: Partial<Course>) => {
     if (courseData.id) {
       setCourses((prev) =>
-        prev.map((c) => (c.id === courseData.id ? ({ ...c, ...courseData } as Course) : c))
+        prev.map((c) =>
+          c.id === courseData.id
+            ? ({ ...c, ...courseData } as Course)
+            : c
+        )
       );
     } else {
       const newCourse: Course = {
@@ -704,6 +787,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         assignments: courseData.assignments || [],
         status: 'active',
       };
+
       setCourses((prev) => [newCourse, ...prev]);
     }
   };
@@ -715,17 +799,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const toggleCategoryStatus = (categoryId: number) => {
     setCategories((prev) =>
       prev.map((cat) =>
-        cat.id === categoryId ? { ...cat, hasActiveCourses: !cat.hasActiveCourses } : cat
+        cat.id === categoryId
+          ? { ...cat, hasActiveCourses: !cat.hasActiveCourses }
+          : cat
       )
     );
   };
 
-  const addOpportunity = (oppData: Omit<Opportunity, 'id' | 'createdAt'>) => {
+  const addOpportunity = (
+    oppData: Omit<Opportunity, 'id' | 'createdAt'>
+  ) => {
     const newOpp: Opportunity = {
       ...oppData,
       id: `opp_${Date.now()}`,
       createdAt: new Date().toISOString(),
     };
+
     setOpportunities((prev) => [newOpp, ...prev]);
   };
 
@@ -735,25 +824,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const login = (userData: User, token?: string) => {
     const normalizedEmail = (userData.email || '').trim().toLowerCase();
-    const finalRole: UserRole = normalizedEmail === 'lyrakaelin@gmail.com' ? 'owner' : userData.role;
-    const securedUser: User = { ...userData, role: finalRole };
+    const finalRole: UserRole =
+      normalizedEmail === 'lyrakaelin@gmail.com'
+        ? 'owner'
+        : userData.role;
+
+    const securedUser: User = {
+      ...userData,
+      role: finalRole,
+    };
 
     setUser(securedUser);
     localStorage.setItem('ph_user', JSON.stringify(securedUser));
+
     if (token) {
       setAccessToken(token);
       localStorage.setItem('ph_access_token', token);
     }
+
     setIsAuthModalOpen(false);
   };
 
   const logout = async () => {
     const tokenToInvalidate = accessToken;
+
     setUser(null);
     setAccessToken(null);
     localStorage.removeItem('ph_user');
     localStorage.removeItem('ph_access_token');
     sessionStorage.clear();
+
     try {
       if (isSupabaseConfigured()) {
         await supabase.auth.signOut();
@@ -761,12 +861,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (e) {
       console.warn('Supabase signout notice:', e);
     }
+
     if (tokenToInvalidate) {
       fetch(apiUrl('/api/auth/logout'), {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${tokenToInvalidate}` },
+        headers: {
+          'Authorization': `Bearer ${tokenToInvalidate}`,
+        },
       }).catch(() => {});
     }
+
     setCurrentView('home');
     setAuthMode('login');
     setIsAuthModalOpen(true);
@@ -836,6 +940,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
 export const useApp = () => {
   const context = useContext(AppContext);
-  if (!context) throw new Error('useApp must be used within an AppProvider');
+
+  if (!context) {
+    throw new Error('useApp must be used within an AppProvider');
+  }
+
   return context;
 };
