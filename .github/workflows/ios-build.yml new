@@ -26,35 +26,24 @@ jobs:
       - name: Build React app
         run: npm run build
 
-      - name: Generate iOS Project
+      - name: Generate iOS project if missing
         run: |
-          if [ ! -d "ios/App" ]; then
+          if [ ! -d "ios/App/App.xcodeproj" ]; then
             npx cap add ios
           fi
 
-      - name: Sync Capacitor iOS
+      - name: Sync Capacitor
         run: npx cap sync ios
 
-      
+      - name: Verify iOS project and scheme
+        run: |
+          test -d ios/App/App.xcodeproj
+          xcodebuild -list -project ios/App/App.xcodeproj
+          
       - name: Build iOS archive
         run: |
-          cd ios/App
           xcodebuild \
-            -project App.xcodeproj \
-            -scheme App \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/PyinnyarHub.xcarchive" \
-            CODE_SIGNING_ALLOWED=NO \
-            archive
-
-
-      - name: Build iOS archive
-        run: |
-          cd ios/App
-          xcodebuild \
-            -workspace App.xcworkspace \
+            -project ios/App/App.xcodeproj \
             -scheme App \
             -configuration Release \
             -sdk iphoneos \
